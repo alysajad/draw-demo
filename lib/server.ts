@@ -1,7 +1,7 @@
 import { Pool, PoolClient } from "pg";
 import { createClient } from "@supabase/supabase-js";
 import { createHash, randomInt, randomUUID } from "node:crypto";
-import { Entry, Event, validateEntries } from "./model";
+import { Entry, Event, validateEntries, validateBranches, nextDraw, eligibleEntries, branches } from "./model";
 const globalDB = globalThis as unknown as { drawPool?: Pool };
 function pool() {
   return (globalDB.drawPool ??= new Pool({
@@ -33,12 +33,12 @@ async function state(db: PoolClient, id: string): Promise<Event> {
     rows: [e],
   } = await db.query("select * from events where id=$1", [id]);
   const { rows } = await db.query(
-    "select * from results where event_id=$1 order by rank desc",
+    "select * from results where event_id=$1 order by drawn_at, branch, rank desc",
     [id],
   );
   return {
     ...e,
-    results: rows.map((r) => ({
+    results: rows.sort((a, b) => branches(e).indexOf(a.branch) - branches(e).indexOf(b.branch) || b.rank - a.rank).map((r) => ({
       ...r.winner,
       rank: r.rank,
       drawn_at: r.drawn_at.toISOString(),
@@ -102,7 +102,9 @@ export async function operate(
         showroom: e.showroom?.trim(),
         vehicle: e.vehicle?.trim(),
       }));
-      const errors = validateEntries(clean);
+      if (body.branch_draw !== undefined && typeof body.branch_draw !== "boolean") throw new Error("Invalid branch draw mode");
+      const branchDraw = body.branch_draw === true;
+      const errors = [...validateEntries(clean), ...(branchDraw ? validateBranches(clean) : [])];
       if (errors.length) throw new Error(errors.slice(0, 5).join(" "));
       const prizes = body.prizes;
       if (
@@ -111,20 +113,21 @@ export async function operate(
         prizes.some((p) => typeof p !== "string" || p.length > 200)
       )
         throw new Error("Invalid prizes");
-      await db.query("update events set entries=$2,prizes=$3 where id=$1", [
+      await db.query("update events set entries=$2,prizes=$3,branch_draw=$4 where id=$1", [
         id,
         JSON.stringify(clean),
         JSON.stringify(prizes),
+        branchDraw,
       ]);
       details = { count: clean.length };
     }
     if (action === "lock") {
       if (event.status !== "draft") throw new Error("Event is already locked");
-      const errors = validateEntries(event.entries);
+      const errors = [...validateEntries(event.entries), ...(event.branch_draw ? validateBranches(event.entries) : [])];
       if (errors.length) throw new Error(errors.join(" "));
       const hash = createHash("sha256")
         .update(
-          JSON.stringify({ entries: event.entries, prizes: event.prizes }),
+          JSON.stringify({ entries: event.entries, prizes: event.prizes, branch_draw: event.branch_draw }),
         )
         .digest("hex");
       await db.query(
@@ -144,18 +147,17 @@ export async function operate(
       if (!same.rowCount) {
         const pending = current.results.find((r) => !r.acknowledged);
         if (!pending) {
+          const next = nextDraw(current, current.branch_draw ? String(body.branch) : undefined);
           if (
-            event.status !== "locked" ||
-            current.results.length >= 3 ||
-            body.rank !== 3 - current.results.length
+            event.status !== "locked" || !next ||
+            body.rank !== next.rank || (current.branch_draw && body.branch !== next.branch)
           )
             throw new Error("Refresh event state before drawing");
-          const eligible = current.entries.filter(
-            (e) => !current.results.some((r) => r.entry_id === e.entry_id),
-          );
+          const eligible = eligibleEntries(current, next.branch);
+          if (!eligible.length) throw new Error("No eligible entries remain for this branch");
           const winner = eligible[randomInt(eligible.length)];
           await db.query(
-            "insert into results(event_id,rank,entry_id,winner,idempotency_key,eligible_count,organizer) values($1,$2,$3,$4,$5,$6,$7)",
+            "insert into results(event_id,rank,entry_id,winner,idempotency_key,eligible_count,organizer,branch) values($1,$2,$3,$4,$5,$6,$7,$8)",
             [
               id,
               body.rank,
@@ -164,10 +166,12 @@ export async function operate(
               body.key,
               eligible.length,
               user,
+              next.branch,
             ],
           );
           details = {
             rank: body.rank,
+            branch: next.branch,
             entry_id: winner.entry_id,
             eligible_count: eligible.length,
             snapshot_hash: event.snapshot_hash,
@@ -182,14 +186,14 @@ export async function operate(
     if (action === "ack") {
       const current = await state(db, id);
       const pending = current.results.find((r) => !r.acknowledged);
-      if (pending && body.rank !== pending.rank)
+      if (pending && (body.rank !== pending.rank || (current.branch_draw && body.entry_id !== pending.entry_id)))
         throw new Error("Result changed; refresh first");
       if (pending) {
         await db.query(
-          "update results set acknowledged=true where event_id=$1 and rank=$2",
-          [id, pending.rank],
+          "update results set acknowledged=true where event_id=$1 and entry_id=$2",
+          [id, pending.entry_id],
         );
-        if (pending.rank === 1)
+        if (!nextDraw(current))
           await db.query("update events set status='complete' where id=$1", [
             id,
           ]);

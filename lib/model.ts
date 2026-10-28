@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import sampleEntries from "./sample-entries.json";
 export type Entry = {
   entry_id: string;
   name: string;
@@ -18,6 +19,7 @@ export type Event = {
   prizes: string[];
   results: Result[];
   snapshot_hash?: string;
+  branch_draw?: boolean;
 };
 export const rankName = (rank: number) =>
   rank === 1 ? "1st" : rank === 2 ? "2nd" : "3rd";
@@ -119,28 +121,45 @@ export function rehearsal(): Event {
     results: [],
   };
 }
-export function rehearsalDraw(event: Event): Event {
-  if (event.results.some((r) => !r.acknowledged) || event.results.length === 3)
-    return event;
-  const eligible = event.entries.filter(
-    (e) => !event.results.some((r) => r.entry_id === e.entry_id),
-  );
+export function branches(event: Event): string[] {
+  return event.branch_draw ? [...new Set(event.entries.map(e => e.showroom || ""))] : [""];
+}
+export function drawSchedule(event: Event) {
+  return branches(event).flatMap(branch => [3, 2, 1].map(rank => ({ branch, rank })));
+}
+export function nextDraw(event: Event, selectedBranch?: string) {
+  const candidates = selectedBranch === undefined ? branches(event) : [selectedBranch];
+  for (const branch of candidates) {
+    if (!branches(event).includes(branch)) continue;
+    const drawn = event.results.filter(
+      result => !event.branch_draw || result.showroom === branch,
+    ).length;
+    if (drawn < 3) return { branch, rank: 3 - drawn };
+  }
+}
+export function eligibleEntries(event: Event, branch: string) {
+  const won = new Set(event.results.map(r => r.entry_id));
+  return event.entries.filter(e => (!event.branch_draw || e.showroom === branch) && !won.has(e.entry_id));
+}
+export function validateBranches(entries: Entry[]) {
+  const counts = new Map<string, number>();
+  for (const entry of entries) counts.set(entry.showroom || "", (counts.get(entry.showroom || "") || 0) + 1);
+  return [...counts].flatMap(([branch, count]) => !branch ? ["Every entry needs a branch."] : count < 3 ? [`${branch} needs at least three eligible entries.`] : []);
+}
+export function sampleRehearsal(): Event {
+  return { id: crypto.randomUUID(), status: "locked", branch_draw: true, entries: sampleEntries,
+    prizes: ["Gold coin · 1st prize", "Gold coin · 2nd prize", "Gold coin · 3rd prize"], results: [] };
+}
+export function rehearsalDraw(event: Event, selectedBranch?: string): Event {
+  const next = nextDraw(event, selectedBranch);
+  if (event.status !== "locked" || event.results.some(r => !r.acknowledged) || !next) return event;
+  const eligible = eligibleEntries(event, next.branch);
+  if (!eligible.length) throw new Error("No eligible entries remain for this branch.");
   const limit = Math.floor(4294967296 / eligible.length) * eligible.length;
   let n: number;
-  do {
-    n = crypto.getRandomValues(new Uint32Array(1))[0];
-  } while (n >= limit);
-  return {
-    ...event,
-    results: [
-      ...event.results,
-      {
-        ...eligible[n % eligible.length],
-        rank: 3 - event.results.length,
-        drawn_at: new Date().toISOString(),
-        eligible_count: eligible.length,
-        acknowledged: false,
-      },
-    ],
-  };
+  do { n = crypto.getRandomValues(new Uint32Array(1))[0]; } while (n >= limit);
+  return { ...event, results: [...event.results, {
+    ...eligible[n % eligible.length], rank: next.rank, drawn_at: new Date().toISOString(),
+    eligible_count: eligible.length, acknowledged: false,
+  }] };
 }

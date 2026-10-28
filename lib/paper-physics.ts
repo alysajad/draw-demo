@@ -69,7 +69,7 @@ export async function createPaperPhysics() {
       // Limit angular travel during a stalled browser frame so a wall cannot teleport through paper.
       angle =
         previousAngle +
-        Math.max(-duration * 5, Math.min(duration * 5, angle - previousAngle));
+        Math.max(-duration * 14, Math.min(duration * 14, angle - previousAngle));
       const steps = Math.max(1, Math.min(12, Math.ceil(duration * 120)));
       for (let i = 1; i <= steps; i++) {
         const next = previousAngle + ((angle - previousAngle) * i) / steps;

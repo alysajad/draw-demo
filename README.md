@@ -11,12 +11,12 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. Rehearsal works immediately, uses fictional entries and persists only in the current browser tab. Settings opens organizer preparation. Rehearsal never calls the live draw service. Sound starts muted and is synthesized locally after the operator enables it.
+Open http://localhost:3000. Rehearsal works immediately using the supplied dummy `samp.xlsx`: 43 entries across Enjakkal (18), Irinjalkuda (12), Kalamaserry (9), and Kayamkulam (4). The operator clicks any branch, then draws its 3rd, 2nd, and 1st prizes. Branches can be completed in any order: 12 winners total. Results persist only in the current browser tab. Settings opens organizer preparation. Rehearsal never calls the live draw service. Sound starts muted and is synthesized locally after the operator enables it.
 
 ## Configure a private live event
 
 1. Create a **dedicated** Supabase project. Do not use the registration application's database.
-2. Run `supabase/schema.sql` in its SQL editor. Tables have RLS enabled with no browser policies. The server uses a privileged PostgreSQL connection; never expose it through a public environment variable.
+2. For a new installation, run `supabase/schema.sql` in its SQL editor. For an existing installation, apply `supabase/migrations/20261028_branch_draw.sql` once before using this version. Tables have RLS enabled with no browser policies. The server uses a privileged PostgreSQL connection; never expose it through a public environment variable.
 3. Disable public signups in Supabase Auth. Invite the organizer in the dashboard, complete their password setup, and add their Auth user UUID:
 
    ```sql
@@ -24,14 +24,18 @@ Open http://localhost:3000. Rehearsal works immediately, uses fictional entries 
    ```
 
 4. Copy `.env.example` to `.env.local`. Set the Supabase URL and anonymous/publishable legacy-compatible key; set `DATABASE_URL` to the dedicated session pooler connection, port 5432, with provider-required TLS. Use the verified provider certificate where required; do not disable certificate verification.
-5. Sign in through Settings, create a separate event, upload UTF-8 CSV, map columns and review errors/repeated names. Required fields: `entry_id`, `name`; optional: `showroom`, `vehicle`. Save reviewed entries and prize descriptions, then lock the event.
-6. Upload/import requests should remain below Vercel's request-body limit (4.5 MB); the maximum entry count is 50,000. Split/reduce oversized source files before event preparation. Only a single combined pool per event is supported.
+5. Sign in through Settings, create a separate event, upload UTF-8 CSV, map columns and review errors/repeated names. Required fields: `entry_id`, `name`, `showroom` (branch); optional: `vehicle`. Each branch needs at least three eligible entries. Save reviewed entries and prize descriptions, then lock the event.
+6. Upload/import requests should remain below Vercel's request-body limit (4.5 MB); the maximum entry count is 50,000. Split/reduce oversized source files before event preparation. New events draw three prizes per branch in source-file branch order. The same flow supports the full 13-branch, 39-winner event. Existing combined-pool events retain their original rules.
 
 Only the event's organizer can access it. Additional organizer accounts create their own events. Inviting a user alone does not grant access until the organizers row exists.
 
 ## Ceremony and recovery
 
-Draw in order: 3rd, 2nd, 1st. Each draw commits before animation starts. Continue acknowledges the result, then a separate draw click is required. The draw enters a viewport-filling ceremony. The camera pushes in and arcs around the box during a ten-second spin. The full reveal takes twenty seconds; the last prize has two extra seconds of anticipation. When enabled, sound includes paper rustles, cradle resonance and a reveal chord. At the reveal, an original SVG illustration of reaching hands surrounds a lemon-gold ticket on a mustard background, inspired by the supplied Pinterest reference. A foil sheen crosses the ticket before the committed name, ID and prize appear. The box physics remains unchanged. Manrope stays on names and interface copy; locally hosted Anton supplies condensed display lettering on the ticket. Reduced motion reveals directly. Escape or Back to event returns to the event controls without changing the result.
+Draw in order: 3rd, 2nd, 1st within each branch. Every draw commits before animation starts and uses only that branch's eligible tickets. A ticket can win once across the event. Continue acknowledges the result; a separate draw click is required for the next prize or branch. The final summary and CSV include all branches.
+
+The box spins quickly for the first two seconds, slows through 3.3 seconds, and opens into the gold gift-box scene. The winner appears at five seconds for every prize. Animated ribbons, a floating gold coin, and coin rain surround the winner. The hidden WebGL scene unmounts during the gold reveal. Reduced motion reveals directly. Escape or Back to event preserves the result.
+
+To regenerate the bundled dummy entries after replacing `samp.xlsx`, run `python3 scripts/import-sample.py`, then restart the sample rehearsal from Settings. The importer reads the supplied workbook layout, excludes rows marked Excluded, rejects flagged rows pending review, validates ticket IDs and per-branch counts, and retains only ticket ID, name, model, and branch. Phone numbers and VINs are not bundled. This is a local conversion for the supplied sample; live preparation continues to accept reviewed CSV files.
 
 If a response is lost, retry with the retained idempotency key or use Recover event. Refresh restores the active live event and its committed result. A pending result blocks new draws, including requests from other tabs. “Show saved result” bypasses graphics; “Replay reveal” never selects again. Browser focus and five-second polling synchronize idle live tabs. No redraw or overwrite endpoint exists.
 

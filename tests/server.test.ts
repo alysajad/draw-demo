@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { operate } from "../lib/server";
-import { rehearsal } from "../lib/model";
+import { rehearsal, sampleRehearsal, nextDraw } from "../lib/model";
 test("PostgreSQL transactions: concurrent draws, retry, immutable snapshots, ownership and completion", async () => {
   const dir = await mkdtemp(join(tmpdir(), "onam-pg-"));
   const postgres = new EmbeddedPostgres({
@@ -108,6 +108,33 @@ test("PostgreSQL transactions: concurrent draws, retry, immutable snapshots, own
       db.query("delete from audit where event_id=$1", [id]),
       /immutable/,
     );
+    let branchEvent = (await operate(user, "create", {}))!;
+    const branchId = branchEvent.id;
+    await assert.rejects(operate(user, "import", { id: branchId, entries: sampleRehearsal().entries.slice(0, 2), prizes: ["", "", ""], branch_draw: true }), /three/);
+    branchEvent = (await operate(user, "import", { id: branchId, entries: sampleRehearsal().entries, prizes: ["Gold", "Gold", "Gold"], branch_draw: true }))!;
+    branchEvent = (await operate(user, "lock", { id: branchId }))!;
+    await assert.rejects(db.query("update events set branch_draw=false where id=$1", [branchId]), /immutable/);
+    let previousId = "stale-ticket";
+    for (const branch of ["Kayamkulam", "Enjakkal", "Kalamaserry", "Irinjalkuda"]) {
+      while (nextDraw(branchEvent, branch)) {
+        const next = nextDraw(branchEvent, branch)!;
+        await assert.rejects(operate(user, "draw", { id: branchId, rank: next.rank, branch: "Wrong branch", key: randomUUID() }), /Refresh/);
+        const key = randomUUID();
+        const draws = await Promise.all(Array.from({ length: 3 }, () => operate(user, "draw", { id: branchId, ...next, key })));
+        branchEvent = draws[0]!;
+        assert.ok(draws.every(d => d!.results.length === branchEvent.results.length));
+        const winner = branchEvent.results.find(result => !result.acknowledged)!;
+        assert.equal(winner.showroom, next.branch);
+        assert.equal(winner.rank, next.rank);
+        await assert.rejects(operate(user, "ack", { id: branchId, rank: next.rank, entry_id: previousId }), /changed/);
+        branchEvent = (await operate(user, "ack", { id: branchId, rank: next.rank, entry_id: winner.entry_id }))!;
+        previousId = winner.entry_id;
+        assert.equal(branchEvent.status, branchEvent.results.length === 12 ? "complete" : "locked");
+      }
+    }
+    assert.equal(branchEvent.results.length, 12);
+    assert.equal(new Set(branchEvent.results.map(r => r.entry_id)).size, 12);
+    assert.ok(branchEvent.results.every(r => r.acknowledged));
   } finally {
     await db?.end();
     await (globalThis as unknown as { drawPool?: Pool }).drawPool?.end();

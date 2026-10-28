@@ -27,16 +27,20 @@ import {
   Event,
   parseCSV,
   rankName,
-  rehearsal,
+  sampleRehearsal,
+  branches,
+  drawSchedule,
+  nextDraw,
+  validateBranches,
   rehearsalDraw,
 } from "@/lib/model";
-import GoldenTicket from "./GoldenTicket";
+import GoldCoinReveal from "./GoldCoinReveal";
 const Scene = dynamic(() => import("./Scene"), {
   ssr: false,
   loading: () => <div className="scene-fallback">Preparing the draw box…</div>,
 });
 import { ceremonyTiming as timing, boxSound } from "@/lib/draw-animation";
-const storage = "nippon-onam-rehearsal-v1";
+const storage = "nippon-onam-branch-rehearsal-v2";
 const liveStorage = "nippon-onam-live-event";
 let auth: SupabaseClient | undefined;
 function client() {
@@ -67,7 +71,8 @@ export default function Ceremony() {
     [clean, setClean] = useState(false),
     [signedIn, setSignedIn] = useState(false);
   const [immersive, setImmersive] = useState(false);
-  const [ticketVisible, setTicketVisible] = useState(false);
+  const [coinVisible, setCoinVisible] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState("");
   const [graphicsFailed, setGraphicsFailed] = useState(false);
   const graphicsFailure = useCallback(() => setGraphicsFailed(true), []);
   const reduced = useReducedMotion();
@@ -80,13 +85,22 @@ export default function Ceremony() {
     [csv, setCsv] = useState(""),
     [mapping, setMapping] = useState<Record<string, string>>({}),
     [prizes, setPrizes] = useState(["", "", ""]);
-  const preview = csv ? parseCSV(csv, mapping) : null;
+  const parsedPreview = csv ? parseCSV(csv, mapping) : null;
+  const preview = parsedPreview ? { ...parsedPreview, errors: [...parsedPreview.errors, ...validateBranches(parsedPreview.entries)] } : null;
   const pending = event?.results.find((r) => !r.acknowledged);
   useEffect(() => {
     setShown(false);
+    if (pending?.showroom) setSelectedBranch(pending.showroom);
   }, [pending?.entry_id]);
   const latest = event?.results.at(-1);
-  const rank = 3 - (event?.results.length || 0);
+  const branchList = event ? branches(event) : [];
+  const activeBranch = event?.branch_draw
+    ? pending?.showroom || (branchList.includes(selectedBranch) ? selectedBranch : branchList[0]) || ""
+    : "";
+  const next = event ? nextDraw(event, activeBranch) : undefined;
+  const rank = next?.rank || 1;
+  const totalPrizes = event ? drawSchedule(event).length : 0;
+  const noDrawsLeft = event ? !nextDraw(event) : true;
   const complete = event?.status === "complete";
   const request = useCallback(
     async (action = "state", data: Record<string, unknown> = {}) => {
@@ -116,9 +130,9 @@ export default function Ceremony() {
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(storage);
-      setEvent(saved ? JSON.parse(saved) : rehearsal());
+      setEvent(saved ? JSON.parse(saved) : sampleRehearsal());
     } catch {
-      setEvent(rehearsal());
+      setEvent(sampleRehearsal());
     }
     const savedLiveId = sessionStorage.getItem(liveStorage);
     setReady(!savedLiveId);
@@ -226,7 +240,7 @@ export default function Ceremony() {
     setPhase("");
   }
   function play(resultRank: number) {
-    setTicketVisible(false);
+    setCoinVisible(false);
     setImmersive(true);
     setShown(false);
     setRevealing(true);
@@ -248,25 +262,25 @@ export default function Ceremony() {
         timing.spinStart,
       ),
       setTimeout(
-        () => setPhase("One chit. One special moment."),
+        () => setPhase("One winner. A golden moment."),
         timing.lidOpen,
       ),
-      setTimeout(() => setTicketVisible(true), timing.paperRise),
+      setTimeout(() => setCoinVisible(true), timing.paperRise),
       setTimeout(stopReveal, duration),
     );
   }
   function draw() {
     if (!event) return;
     void work(async () => {
-      let next: Event;
+      let updated: Event;
       if (live) {
-        const keyName = `draw-key-${event.id}-${rank}`;
+        const keyName = `draw-key-${event.id}-${event.results.length}-${rank}`;
         const key = sessionStorage.getItem(keyName) || crypto.randomUUID();
         sessionStorage.setItem(keyName, key);
-        next = (await request("draw", { id: event.id, rank, key }))!;
-      } else next = rehearsalDraw(event);
-      setEvent(next);
-      const winner = next.results.find((r) => !r.acknowledged);
+        updated = (await request("draw", { id: event.id, rank, branch: activeBranch, key }))!;
+      } else updated = rehearsalDraw(event, activeBranch);
+      setEvent(updated);
+      const winner = updated.results.find((r) => !r.acknowledged);
       if (winner) play(winner.rank);
     });
   }
@@ -274,16 +288,16 @@ export default function Ceremony() {
     if (!event || !pending) return;
     void work(async () => {
       if (live)
-        setEvent(await request("ack", { id: event.id, rank: pending.rank }));
+        setEvent(await request("ack", { id: event.id, rank: pending.rank, entry_id: pending.entry_id }));
       else
         setEvent({
           ...event,
-          status: pending.rank === 1 ? "complete" : "locked",
+          status: nextDraw(event) ? "locked" : "complete",
           results: event.results.map((r) => ({ ...r, acknowledged: true })),
         });
       setShown(false);
       setSequence(0);
-      setTicketVisible(false);
+      setCoinVisible(false);
       setImmersive(false);
     });
   }
@@ -314,7 +328,7 @@ export default function Ceremony() {
   return (
     <MotionConfig reducedMotion="user">
       <main
-        className={`${clean ? "clean" : ""} ${immersive ? "immersive" : ""} ${shown ? "result-shown" : ""} ${graphicsFailed ? "graphics-failed" : ""} ${immersive && (ticketVisible || shown) ? "golden-active" : ""}`}
+        className={`${clean ? "clean" : ""} ${immersive ? "immersive" : ""} ${shown ? "result-shown" : ""} ${graphicsFailed ? "graphics-failed" : ""} ${immersive && (coinVisible || shown) ? "golden-active" : ""}`}
       >
         {immersive && (
           <button
@@ -363,6 +377,20 @@ export default function Ceremony() {
             Nippon Toyota <span>·</span> Onam Lucky Draw
           </p>
         </section>
+        {event?.branch_draw && <section className="branch-progress" aria-label="Branch progress">
+          <div><span className="eyebrow">{complete ? "ALL BRANCHES COMPLETE" : `BRANCH ${branchList.indexOf(activeBranch) + 1} OF ${branchList.length}`}</span>
+            <h2>{complete ? "Every branch. A golden moment." : activeBranch}</h2>
+            <p>{event.results.filter(r => r.acknowledged).length} of {totalPrizes} winners revealed · 3rd → 2nd → 1st per branch</p></div>
+          <div className="branch-list">{branchList.map(branch => <button
+            type="button"
+            key={branch}
+            aria-pressed={branch === activeBranch}
+            disabled={!!pending || revealing || busy}
+            onClick={() => setSelectedBranch(branch)}
+          >
+            {branch}<small>{event.results.filter(r => r.showroom === branch && r.acknowledged).length}/3</small>
+          </button>)}</div>
+        </section>}
         <section className="stage" aria-label="Lucky draw ceremony">
           <div className="side-note">
             <Flower2 size={25} />
@@ -372,7 +400,7 @@ export default function Ceremony() {
             </span>
           </div>
           <div className={`scene ${sequence > 0 ? "scene-closeup" : ""}`}>
-            <Scene
+            {!(immersive && (coinVisible || shown)) && <Scene
               sequence={sequence}
               reduced={!!reduced}
               quality={quality}
@@ -380,10 +408,10 @@ export default function Ceremony() {
               winner={winner}
               prize={winner ? event?.prizes[winner.rank - 1] || "" : ""}
               onFailure={graphicsFailure}
-            />
+            />}
           </div>
           <div className="pool-note">
-            <span className="pool-number">{event?.entries.length || "·"}</span>
+            <span className="pool-number">{(event?.branch_draw && !complete ? event.entries.filter(e => e.showroom === activeBranch).length : event?.entries.length) || "·"}</span>
             <span>
               ENTRIES
               <br />
@@ -391,8 +419,8 @@ export default function Ceremony() {
             </span>
             <i />
           </div>
-          {immersive && (ticketVisible || shown) && winner && !complete && (
-            <GoldenTicket
+          {immersive && (coinVisible || shown) && winner && !complete && (
+            <GoldCoinReveal
               key={sequence}
               winner={winner}
               prize={event?.prizes[winner.rank - 1] || ""}
@@ -447,7 +475,7 @@ export default function Ceremony() {
           {complete ? (
             <>
               <span className="eyebrow">
-                THREE WINNERS. ONE WONDERFUL CELEBRATION.
+                {totalPrizes} WINNERS. ONE WONDERFUL CELEBRATION.
               </span>
               <h2>Here's to your next great journey.</h2>
               <div className="actions">
@@ -469,7 +497,7 @@ export default function Ceremony() {
                     ? shown
                       ? "A moment worth celebrating."
                       : "A saved winner is ready to reveal."
-                    : `${rankName(Math.max(rank, 1))} PRIZE${event?.prizes[rank - 1] ? ` · ${event.prizes[rank - 1]}` : ""}`}
+                    : `${activeBranch ? activeBranch + " · " : ""}${rankName(Math.max(rank, 1))} PRIZE${event?.prizes[rank - 1] ? ` · ${event.prizes[rank - 1]}` : ""}`}
               </div>
               {revealing ? (
                 <button
@@ -489,9 +517,8 @@ export default function Ceremony() {
                       disabled={busy}
                       onClick={acknowledge}
                     >
-                      {pending.rank === 1
-                        ? "Celebrate all winners"
-                        : `Continue to ${rankName(pending.rank - 1)} prize`}
+                      {noDrawsLeft ? "Celebrate all winners" : !next
+                        ? "Choose another branch" : `Continue to ${rankName(next.rank)} prize`}
                       <ArrowRight size={18} />
                     </motion.button>
                     <button
@@ -522,19 +549,19 @@ export default function Ceremony() {
                 <motion.button
                   whileTap={{ scale: 0.98 }}
                   className="primary"
-                  disabled={busy || !ready || event?.status !== "locked"}
+                  disabled={busy || !ready || event?.status !== "locked" || !next}
                   onClick={draw}
                 >
                   {busy
                     ? "Saving the winner…"
-                    : `Draw ${rankName(Math.max(rank, 1))} prize`}
+                    : next ? `Draw ${rankName(rank)} prize` : "Branch draw complete"}
                   <ArrowRight size={18} />
                 </motion.button>
               )}
               <p className="control-hint">
                 {live
                   ? "Every entry. An equal chance."
-                  : "Fictional entries · Practice the complete ceremony"}
+                  : "samp.xlsx · Dummy rehearsal · No live winners"}
               </p>
             </>
           )}
@@ -564,21 +591,21 @@ export default function Ceremony() {
           className={`prizes ${complete ? "podium" : ""}`}
           aria-label="Prize winners"
         >
-          {(complete ? [2, 1, 3] : [3, 2, 1]).map((r) => {
-            const result = event?.results.find((w) => w.rank === r);
+          {(complete ? branchList : [activeBranch]).flatMap(branch => (complete ? [2, 1, 3] : [3, 2, 1]).map(r => ({ branch, r }))).map(({ branch, r }) => {
+            const result = event?.results.find(w => w.rank === r && (!event.branch_draw || w.showroom === branch));
             const visible = result && (result.acknowledged || shown);
             return (
               <motion.div
                 layout={!reduced}
                 className={`prize ${rank === r && !pending ? "current" : ""} ${complete && r === 1 ? "first" : ""}`}
-                key={r}
+                key={`${branch}-${r}`}
               >
                 <span className="prize-medal">
                   {r}
                   <small>{r === 1 ? "ST" : r === 2 ? "ND" : "RD"}</small>
                 </span>
                 <div>
-                  <span className="prize-label">{rankName(r)} PRIZE</span>
+                  <span className="prize-label">{branch && `${branch} · `}{rankName(r)} PRIZE</span>
                   <h3>
                     {visible
                       ? result.name
@@ -690,19 +717,19 @@ export default function Ceremony() {
               <div className="rehearsal-panel">
                 <div>
                   <h3>A little practice. A perfect moment.</h3>
-                  <p>Try all three draws with fictional participants.</p>
+                  <p>Use samp.xlsx: 43 dummy entries, four branches, three prizes per branch.</p>
                   <button
                     disabled={busy}
                     onClick={() => {
                       sessionStorage.removeItem(liveStorage);
                       setLive(false);
-                      setEvent(rehearsal());
+                      setEvent(sampleRehearsal());
                       setShown(false);
                       setError("");
                       setSetup(false);
                     }}
                   >
-                    Start a new rehearsal <ArrowRight size={15} />
+                    Restart sample rehearsal <ArrowRight size={15} />
                   </button>
                 </div>
                 <div className="ticket-preview">
@@ -829,7 +856,7 @@ export default function Ceremony() {
                           await client()!.auth.signOut();
                           sessionStorage.removeItem(liveStorage);
                           setLive(false);
-                          setEvent(rehearsal());
+                          setEvent(sampleRehearsal());
                           setShown(false);
                         })
                       }
@@ -968,6 +995,7 @@ export default function Ceremony() {
                                       id: event.id,
                                       entries: preview!.entries,
                                       prizes,
+                                      branch_draw: true,
                                     }),
                                   ),
                                 )
@@ -1007,7 +1035,7 @@ export default function Ceremony() {
                         <>
                           <p>
                             {event.entries.length} frozen entries ·{" "}
-                            {event.results.length}/3 winners committed
+                            {event.results.length}/{drawSchedule(event).length} winners committed
                           </p>
                           <button
                             className="primary"

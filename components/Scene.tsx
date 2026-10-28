@@ -206,11 +206,11 @@ function World({
       .add(
         p,
         {
-          distance: 5.8,
+          distance: 5.6,
           height: 2.8,
           target: 1.65,
-          duration: 2000,
-          ease: "inOutSine",
+          duration: 900,
+          ease: "outQuad",
         },
         0,
       )
@@ -218,15 +218,24 @@ function World({
         p,
         {
           spin: Math.PI * 8,
-          duration: timing.spinEnd - timing.spinStart,
-          ease: "inOutSine",
+          duration: timing.fastSpinEnd,
+          ease: "linear",
         },
         timing.spinStart,
       )
       .add(
         p,
-        { azimuth: -0.48, bank: -0.025, duration: 8500, ease: "inOutSine" },
-        2000,
+        {
+          spin: Math.PI * 10,
+          duration: timing.spinEnd - timing.fastSpinEnd,
+          ease: "outQuad",
+        },
+        timing.fastSpinEnd,
+      )
+      .add(
+        p,
+        { azimuth: -0.42, bank: -0.025, duration: 2200, ease: "inOutSine" },
+        timing.spinStart,
       )
       .add(
         p,
@@ -235,27 +244,27 @@ function World({
           bank: 0,
           distance: 5.3,
           height: 2.7,
-          duration: 5500,
+          duration: 1400,
           ease: "inOutSine",
         },
-        10500,
+        1900,
       )
-      .add(p, { lid: -1.9, duration: 1600, ease: "inOutSine" }, timing.lidOpen)
+      .add(p, { lid: -1.9, duration: 450, ease: "outQuad" }, timing.lidOpen)
       .add(
         p,
         {
           lift: 1.05,
           target: 2.15,
           height: 2.5,
-          duration: 2200,
-          ease: "inOutSine",
+          duration: 650,
+          ease: "outQuad",
         },
         timing.paperRise,
       )
       .add(
         p,
-        { unfold: 1, paperScale: 1, duration: 2200, ease: "inOutSine" },
-        17800,
+        { unfold: 1, paperScale: 1, duration: 650, ease: "outQuad" },
+        timing.paperRise + 350,
       );
     timeline.current = tl;
     return () => {

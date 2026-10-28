@@ -1,13 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { ceremonyTiming } from "../lib/draw-animation";
 import { createPaperPhysics, PAPER_COUNT } from "../lib/paper-physics";
 test("folded papers stay inside the rotating collider and settle under gravity", async () => {
   const simulation = await createPaperPhysics();
   try {
     assert.equal(simulation.bodies.length, PAPER_COUNT);
     for (let frame = 0; frame < 840; frame++) {
-      const t = Math.min(1, Math.max(0, (frame - 120) / 600));
-      const angle = (8 * Math.PI * (1 - Math.cos(Math.PI * t))) / 2;
+      const t = Math.min(1, Math.max(0, (frame / 60 * 1000 - ceremonyTiming.spinStart) / (ceremonyTiming.spinEnd - ceremonyTiming.spinStart)));
+      const angle = t < 0.61
+        ? 8 * Math.PI * (t / 0.61)
+        : 8 * Math.PI + 2 * Math.PI * (1 - (1 - (t - 0.61) / 0.39) ** 2);
       simulation.step(angle, 1 / 60);
       for (const body of simulation.bodies) {
         const p = body.translation();
