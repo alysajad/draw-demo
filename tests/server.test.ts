@@ -40,7 +40,7 @@ test("PostgreSQL transactions: concurrent draws, retry, immutable snapshots, own
     await assert.rejects(operate(user, "lock", { id }), /three/);
     e = (await operate(user, "import", {
       id,
-      entries: rehearsal().entries,
+      entries: rehearsal().entries.map(entry => ({ ...entry, vehicle: "Glanza", mobile: "0123456789" })),
       prizes: ["First", "Second", "Third"],
     }))!;
     e = (await operate(user, "lock", { id }))!;
@@ -66,6 +66,8 @@ test("PostgreSQL transactions: concurrent draws, retry, immutable snapshots, own
     assert.ok(draws.every((d) => d!.results.length === 1));
     assert.equal(new Set(draws.map((d) => d!.results[0].entry_id)).size, 1);
     const original = draws[0]!.results[0];
+    assert.equal(original.vehicle, "Glanza");
+    assert.equal(original.mobile, "0123456789");
     e = (await operate(user, "state", { id }))!;
     assert.equal(e.results[0].entry_id, original.entry_id);
     await assert.rejects(

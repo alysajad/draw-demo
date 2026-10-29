@@ -92,3 +92,17 @@ test("an operator can select branches in any order while prize order stays third
     order,
   );
 });
+
+test("customer car and mobile survive mapped CSV, draw and result export", () => {
+  const parsed = parseCSV("ID,Customer,Car,Phone\n1,A,Glanza,0123456789\n2,B,Innova,+91 0000000000\n3,C,Hyryder,0000000000", {
+    entry_id: "ID", name: "Customer", vehicle: "Car", mobile: "Phone",
+  });
+  assert.deepEqual(parsed.errors, []);
+  assert.equal(parsed.entries[0].mobile, "0123456789");
+  const event = rehearsalDraw({ ...rehearsal(), entries: parsed.entries });
+  const winner = event.results[0];
+  assert.equal(winner.mobile, parsed.entries.find(e => e.entry_id === winner.entry_id)!.mobile);
+  const exported = parseCSV(csvResults(event));
+  assert.equal(exported.entries[0].vehicle, winner.vehicle);
+  assert.equal(exported.entries[0].mobile, winner.mobile!.startsWith("+") ? "'" + winner.mobile : winner.mobile);
+});

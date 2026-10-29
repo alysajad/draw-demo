@@ -92,7 +92,8 @@ export async function operate(
             typeof e.entry_id !== "string" ||
             typeof e.name !== "string" ||
             (e.showroom !== undefined && typeof e.showroom !== "string") ||
-            (e.vehicle !== undefined && typeof e.vehicle !== "string"),
+            (e.vehicle !== undefined && typeof e.vehicle !== "string") ||
+            (e.mobile !== undefined && typeof e.mobile !== "string"),
         )
       )
         throw new Error("Invalid entries");
@@ -101,6 +102,7 @@ export async function operate(
         name: e.name.trim(),
         showroom: e.showroom?.trim(),
         vehicle: e.vehicle?.trim(),
+        mobile: e.mobile?.trim(),
       }));
       if (body.branch_draw !== undefined && typeof body.branch_draw !== "boolean") throw new Error("Invalid branch draw mode");
       const branchDraw = body.branch_draw === true;

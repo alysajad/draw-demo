@@ -72,11 +72,14 @@ export default function GoldCoinReveal({ winner, prize, shown, reduced }: {
       <GiftBox />
       <div className="coin-result">
         <p className="coin-kicker">{winner.showroom || "NIPPON TOYOTA"} · ONAM LUCKY DRAW</p>
-        <h2 className="coin-title">{shown ? "A GOLDEN MOMENT." : "GOOD FORTUNE AWAITS."}</h2>
+        <h2 className={`coin-title ${shown ? "coin-winner" : ""} ${shown && winner.name.length > 45 ? "coin-long-name" : ""}`}>{shown ? winner.name : "GOOD FORTUNE AWAITS."}</h2>
         <div className="coin-divider"><span />✦<span /></div>
         {shown ? <motion.div initial={{ opacity: 0, y: reduced ? 0 : 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .7 }}>
           <p className="coin-rank">CONGRATULATIONS · {rankName(winner.rank)} PRIZE WINNER</p>
-          <h3 className={`coin-winner ${winner.name.length > 45 ? "coin-long-name" : ""}`}>{winner.name}</h3>
+          <dl className="coin-customer">
+            <div><dt>Car</dt><dd>{winner.vehicle || "Not provided"}</dd></div>
+            <div><dt>Mobile no.</dt><dd>{winner.mobile || "Not provided"}</dd></div>
+          </dl>
           <p className="coin-entry">{winner.entry_id}{winner.showroom && ` · ${winner.showroom}`}</p>
           <p className="coin-prize">{prize || "Gold coin"}</p>
         </motion.div> : <p className="coin-anticipation">Something golden is coming your way.</p>}

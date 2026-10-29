@@ -163,3 +163,36 @@ test("gold coin reveal fits mobile and respects reduced motion", async ({ page }
   await page.getByRole("button", { name: "Replay reveal" }).click();
   await expect(page.locator(".coin-winner")).toHaveText(name);
 });
+
+test("customer headline and selected draw music", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("http://localhost:3000");
+  await page.getByRole("button", { name: "Draw 3rd prize" }).waitFor();
+  await page.evaluate(() => {
+    const key = "nippon-onam-branch-rehearsal-v2";
+    const event = JSON.parse(sessionStorage.getItem(key)!);
+    event.entries = event.entries.map((entry: object) => ({ ...entry, mobile: "0123456789" }));
+    sessionStorage.setItem(key, JSON.stringify(event));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Open event preparation" }).click();
+  // A valid one-second silent WAV exercises native audio loading and looping.
+  const wav = Buffer.alloc(44 + 16000);
+  wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28);
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+  wav.write("data", 36); wav.writeUInt32LE(16000, 40);
+  await page.getByLabel("Kerala lottery music file").setInputFiles({ name: "draw-music.wav", mimeType: "audio/wav", buffer: wav });
+  await page.getByRole("button", { name: "Preview music", exact: true }).click();
+  await expect.poll(() => page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.paused)).toBe(false);
+  await page.getByRole("button", { name: "Close preparation" }).click();
+  await expect.poll(() => page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.paused)).toBe(true);
+  await page.getByRole("button", { name: "Draw 3rd prize" }).click();
+  await expect(page.locator(".coin-title")).toHaveText(await page.locator(".winner-card h2").innerText());
+  await expect(page.locator(".coin-customer")).toContainText("0123456789");
+  await expect(page.locator(".coin-customer")).not.toContainText("Not provided");
+  await expect.poll(() => page.locator("audio").evaluate((audio: HTMLAudioElement) => !audio.paused && audio.loop)).toBe(true);
+  await page.getByRole("button", { name: "Continue to 2nd prize" }).click();
+  await expect.poll(() => page.locator("audio").evaluate((audio: HTMLAudioElement) => audio.paused)).toBe(true);
+});

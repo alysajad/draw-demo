@@ -5,6 +5,7 @@ export type Entry = {
   name: string;
   showroom?: string;
   vehicle?: string;
+  mobile?: string;
 };
 export type Result = Entry & {
   rank: number;
@@ -38,7 +39,7 @@ export function parseCSV(csv: string, mapping: Record<string, string> = {}) {
   const entries: Entry[] = parsed.data.map(
     (row) =>
       Object.fromEntries(
-        ["entry_id", "name", "showroom", "vehicle"].map((k) => [
+        ["entry_id", "name", "showroom", "vehicle", "mobile"].map((k) => [
           k,
           (row[mapping[k] || k] || "").trim(),
         ]),
@@ -86,6 +87,8 @@ export function csvResults(event: Event) {
       entry_id: safe(r.entry_id),
       name: safe(r.name),
       showroom: safe(r.showroom || ""),
+      vehicle: safe(r.vehicle || ""),
+      mobile: safe(r.mobile || ""),
       drawn_at: r.drawn_at,
       eligible_count: r.eligible_count,
       snapshot_hash: event.snapshot_hash || "REHEARSAL",

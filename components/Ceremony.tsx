@@ -80,6 +80,24 @@ export default function Ceremony() {
   const timer = useRef<ReturnType<typeof setTimeout>[]>([]);
   const audio = useRef<AudioContext | null>(null);
   const stopAudio = useRef<(() => void) | null>(null);
+  const music = useRef<HTMLAudioElement | null>(null);
+  const [musicFile, setMusicFile] = useState<File | null>(null);
+  const [musicUrl, setMusicUrl] = useState("");
+  const [musicError, setMusicError] = useState("");
+  useEffect(() => {
+    if (!musicFile) { setMusicUrl(""); return; }
+    const url = URL.createObjectURL(musicFile);
+    setMusicUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [musicFile]);
+  useEffect(() => {
+    const player = music.current;
+    if (!player || !musicUrl) return;
+    player.volume = 0.35;
+    if (immersive && !muted) {
+      void player.play().catch(() => setMusicError("Music could not play. Preview the track in event preparation, then try again."));
+    } else player.pause();
+  }, [immersive, muted, musicUrl, setup]);
   const [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
     [csv, setCsv] = useState(""),
@@ -250,7 +268,7 @@ export default function Ceremony() {
     stopAudio.current?.();
     const duration =
       timing.reveal + (resultRank === 1 ? timing.firstPrizePause : 0);
-    if (!muted && audio.current && !reduced)
+    if (!muted && !musicUrl && audio.current && !reduced)
       stopAudio.current = boxSound(audio.current, duration / 1000);
     if (reduced) {
       timer.current.push(setTimeout(stopReveal, 400));
@@ -446,6 +464,8 @@ export default function Ceremony() {
                   {winner.entry_id}
                   {winner.showroom && ` · ${winner.showroom}`}
                 </p>
+                <p>Car: {winner.vehicle || "Not provided"}</p>
+                <p>Mobile no.: {winner.mobile || "Not provided"}</p>
                 {event?.prizes[winner.rank - 1] && (
                   <p>{event.prizes[winner.rank - 1]}</p>
                 )}
@@ -665,6 +685,14 @@ export default function Ceremony() {
             </button>
           </div>
         </footer>
+        <audio
+          ref={music}
+          src={musicUrl || undefined}
+          loop
+          muted={muted}
+          preload="auto"
+          onError={() => setMusicError("This track could not be loaded. Choose a supported MP3 or WAV file.")}
+        />
         {clean && (
           <button className="exit-clean" onClick={() => setClean(false)}>
             Exit screenshot view
@@ -740,6 +768,34 @@ export default function Ceremony() {
                   />
                 </div>
               </div>
+              <h3 className="section-title">Draw music</h3>
+              <label>
+                Kerala lottery music file
+                <input type="file" accept="audio/*" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setMusicError("");
+                  setMusicFile(file);
+                  setMuted(false);
+                }} />
+              </label>
+              <p className="notice">Choose the recording to loop during the draw and winner reveal. Select it again after refreshing this page.</p>
+              {musicFile && <>
+                <p>{musicFile.name}</p>
+                <div className="actions">
+                  <button onClick={() => {
+                    setMuted(false);
+                    if (music.current) {
+                      music.current.muted = false;
+                      music.current.volume = 0.35;
+                      void music.current.play().catch(() => setMusicError("Unable to play this track. Choose another audio file."));
+                    }
+                  }}>Preview music</button>
+                  <button onClick={() => music.current?.pause()}>Stop preview</button>
+                  <button onClick={() => { music.current?.pause(); setMusicFile(null); setMusicError(""); }}>Remove music</button>
+                </div>
+              </>}
+              {musicError && <p className="error" role="alert">{musicError}</p>}
               <h3 className="section-title">
                 <LockKeyhole size={17} /> Live event preparation
               </h3>
@@ -902,6 +958,7 @@ export default function Ceremony() {
                                   "name",
                                   "showroom",
                                   "vehicle",
+                                  "mobile",
                                 ].map((k) => (
                                   <label key={k}>
                                     {k}
@@ -946,6 +1003,8 @@ export default function Ceremony() {
                                       <th>Entry ID</th>
                                       <th>Name</th>
                                       <th>Showroom</th>
+                                      <th>Car</th>
+                                      <th>Mobile no.</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -956,6 +1015,8 @@ export default function Ceremony() {
                                           <td>{entry.entry_id}</td>
                                           <td>{entry.name}</td>
                                           <td>{entry.showroom}</td>
+                                          <td>{entry.vehicle || "Not provided"}</td>
+                                          <td>{entry.mobile || "Not provided"}</td>
                                         </tr>
                                       ))}
                                   </tbody>
