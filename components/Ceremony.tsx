@@ -362,9 +362,9 @@ export default function Ceremony() {
         )}
         <header className="header">
           <a className="brand" href="/" aria-label="Nippon Toyota home">
-            <span className="brand-mark">N</span>
+            <img className="brand-mark" src="/toyota-emblem.svg" alt="" width={48} height={31} />
             <span>
-              NIPPON <b>TOYOTA</b>
+              Nippon Toyota
               <small>HAPPINESS, DRIVEN TOGETHER.</small>
             </span>
           </a>
