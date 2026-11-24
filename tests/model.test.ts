@@ -1,6 +1,7 @@
+import { testEvent, mockDraw, sampleEvent } from "./fixtures";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCSV, rehearsal, rehearsalDraw, csvResults, sampleRehearsal, drawSchedule, nextDraw, validateBranches } from "../lib/model";
+import { parseCSV, csvResults, drawSchedule, nextDraw, validateBranches } from "../lib/model";
 test("CSV validates quoting, UTF-8, BOM and explicit mapping", () => {
   const parsed = parseCSV(
     '\uFEFFID,Person\r\n1,"Nair, Meera"\r\n2,സൂര്യ നായർ\r\n3,Ananya',
@@ -24,24 +25,24 @@ test("malformed CSV, missing columns, duplicate IDs, insufficient and long entri
   assert.equal(repeated.warnings.length, 1);
 });
 test("ceremony commits once, holds result, draws in order without replacement", () => {
-  let e = rehearsal();
+  let e = testEvent();
   for (const rank of [3, 2, 1]) {
-    e = rehearsalDraw(e);
+    e = mockDraw(e);
     assert.equal(e.results.at(-1)!.rank, rank);
-    assert.deepEqual(rehearsalDraw(e), e);
+    assert.deepEqual(mockDraw(e), e);
     e = { ...e, results: e.results.map((r) => ({ ...r, acknowledged: true })) };
   }
   assert.equal(new Set(e.results.map((r) => r.entry_id)).size, 3);
-  assert.deepEqual(rehearsalDraw(e), e);
+  assert.deepEqual(mockDraw(e), e);
 });
 test("exports protect against spreadsheet formulas", () => {
-  const e = rehearsalDraw(rehearsal());
+  const e = mockDraw(testEvent());
   e.results[0].name = '=HYPERLINK("bad")';
   assert.ok(csvResults(e).includes("'=HYPERLINK"));
 });
 
 test("sample workbook produces twelve branch-isolated winners and supports thirteen branches", () => {
-  const sample = sampleRehearsal();
+  const sample = sampleEvent();
   assert.equal(sample.entries.length, 43);
   assert.deepEqual(validateBranches(sample.entries), []);
   assert.ok(validateBranches(sample.entries.slice(0, 2)).length);
@@ -54,29 +55,29 @@ test("sample workbook produces twelve branch-isolated winners and supports thirt
     assert.equal(schedule.length, event === sample ? 12 : 39);
     for (const expected of schedule) {
       const before = event.results.length;
-      event = rehearsalDraw(event);
+      event = mockDraw(event);
       const winner = event.results.at(-1)!;
       assert.equal(winner.showroom, expected.branch);
       assert.equal(winner.rank, expected.rank);
       assert.equal(winner.eligible_count, event.entries.filter(e => e.showroom === expected.branch).length - (3 - expected.rank));
       assert.equal(event.results.length, before + 1);
-      assert.deepEqual(rehearsalDraw(event), event);
+      assert.deepEqual(mockDraw(event), event);
       event = JSON.parse(JSON.stringify({ ...event, results: event.results.map(r => ({ ...r, acknowledged: true })) }));
     }
     assert.equal(nextDraw(event), undefined);
     assert.equal(new Set(event.results.map(r => r.entry_id)).size, schedule.length);
-    assert.deepEqual(rehearsalDraw(event), event);
+    assert.deepEqual(mockDraw(event), event);
     assert.equal(csvResults(event).split("\r\n").length, schedule.length + 1);
   }
 });
 
 test("an operator can select branches in any order while prize order stays third to first", () => {
-  let event = sampleRehearsal();
+  let event = sampleEvent();
   const order = ["Kayamkulam", "Enjakkal", "Kalamaserry", "Irinjalkuda"];
   for (const branch of order) {
     for (const rank of [3, 2, 1]) {
       assert.deepEqual(nextDraw(event, branch), { branch, rank });
-      event = rehearsalDraw(event, branch);
+      event = mockDraw(event, branch);
       assert.equal(event.results.at(-1)!.showroom, branch);
       assert.equal(event.results.at(-1)!.rank, rank);
       event = {
@@ -99,7 +100,7 @@ test("customer car and mobile survive mapped CSV, draw and result export", () =>
   });
   assert.deepEqual(parsed.errors, []);
   assert.equal(parsed.entries[0].mobile, "0123456789");
-  const event = rehearsalDraw({ ...rehearsal(), entries: parsed.entries });
+  const event = mockDraw({ ...testEvent(), entries: parsed.entries });
   const winner = event.results[0];
   assert.equal(winner.mobile, parsed.entries.find(e => e.entry_id === winner.entry_id)!.mobile);
   const exported = parseCSV(csvResults(event));

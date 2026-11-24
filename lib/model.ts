@@ -1,5 +1,4 @@
 import Papa from "papaparse";
-import sampleEntries from "./sample-entries.json";
 export type Entry = {
   entry_id: string;
   name: string;
@@ -34,14 +33,14 @@ export function parseCSV(csv: string, mapping: Record<string, string> = {}) {
     (e) => `Row ${(e.row ?? 0) + 2}: ${e.message}`,
   );
   for (const key of ["entry_id", "name"])
-    if (!headers.includes(mapping[key] || key))
+    if (!headers.includes(mapping[key] ?? key))
       errors.push(`Map a column to ${key}.`);
   const entries: Entry[] = parsed.data.map(
     (row) =>
       Object.fromEntries(
         ["entry_id", "name", "showroom", "vehicle", "mobile"].map((k) => [
           k,
-          (row[mapping[k] || k] || "").trim(),
+          (row[mapping[k] ?? k] || "").trim(),
         ]),
       ) as Entry,
   );
@@ -91,38 +90,12 @@ export function csvResults(event: Event) {
       mobile: safe(r.mobile || ""),
       drawn_at: r.drawn_at,
       eligible_count: r.eligible_count,
-      snapshot_hash: event.snapshot_hash || "REHEARSAL",
+      snapshot_hash: event.snapshot_hash || "",
     })),
   );
 }
 function safe(v: string) {
   return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
-}
-export function rehearsal(): Event {
-  return {
-    id: crypto.randomUUID(),
-    status: "locked",
-    entries: [
-      "Ananya Menon",
-      "Arjun Nair",
-      "Meera Krishnan",
-      "Rahul Varma",
-      "Devika Pillai",
-      "Vivek Kumar",
-      "Aparna Das",
-      "Nikhil Raj",
-      "സൂര്യ നായർ",
-      "Kavya Mohan",
-      "Aditya Suresh",
-      "Lakshmi Ravi",
-    ].map((name, i) => ({
-      entry_id: `DEMO-${String(i + 1).padStart(3, "0")}`,
-      name,
-      showroom: ["Kochi", "Thrissur", "Kozhikode"][i % 3],
-    })),
-    prizes: ["", "", ""],
-    results: [],
-  };
 }
 export function branches(event: Event): string[] {
   return event.branch_draw ? [...new Set(event.entries.map(e => e.showroom || ""))] : [""];
@@ -148,21 +121,4 @@ export function validateBranches(entries: Entry[]) {
   const counts = new Map<string, number>();
   for (const entry of entries) counts.set(entry.showroom || "", (counts.get(entry.showroom || "") || 0) + 1);
   return [...counts].flatMap(([branch, count]) => !branch ? ["Every entry needs a branch."] : count < 3 ? [`${branch} needs at least three eligible entries.`] : []);
-}
-export function sampleRehearsal(): Event {
-  return { id: crypto.randomUUID(), status: "locked", branch_draw: true, entries: sampleEntries,
-    prizes: ["Gold coin · 1st prize", "Gold coin · 2nd prize", "Gold coin · 3rd prize"], results: [] };
-}
-export function rehearsalDraw(event: Event, selectedBranch?: string): Event {
-  const next = nextDraw(event, selectedBranch);
-  if (event.status !== "locked" || event.results.some(r => !r.acknowledged) || !next) return event;
-  const eligible = eligibleEntries(event, next.branch);
-  if (!eligible.length) throw new Error("No eligible entries remain for this branch.");
-  const limit = Math.floor(4294967296 / eligible.length) * eligible.length;
-  let n: number;
-  do { n = crypto.getRandomValues(new Uint32Array(1))[0]; } while (n >= limit);
-  return { ...event, results: [...event.results, {
-    ...eligible[n % eligible.length], rank: next.rank, drawn_at: new Date().toISOString(),
-    eligible_count: eligible.length, acknowledged: false,
-  }] };
 }

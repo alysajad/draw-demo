@@ -58,7 +58,7 @@ export default function GoldCoinReveal({ winner, prize, shown, reduced }: {
   winner: Result; prize: string; shown: boolean; reduced: boolean;
 }) {
   return <motion.div className={`coin-reveal ${shown ? "coin-revealed" : ""} ${reduced ? "coin-reduced" : ""}`}
-    initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? .15 : .7 }}>
+    initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduced ? 0 : .7 }}>
     {shown && !reduced && <div className="coin-rain" aria-hidden="true">
       {Array.from({ length: 34 }, (_, i) => <div className="falling-coin" key={i} style={{
         left: `${(i * 37 + 3) % 100}%`, "--delay": `${(i % 12) * .22}s`,
@@ -74,7 +74,7 @@ export default function GoldCoinReveal({ winner, prize, shown, reduced }: {
         <p className="coin-kicker">{winner.showroom || "NIPPON TOYOTA"} · ONAM LUCKY DRAW</p>
         <h2 className={`coin-title ${shown ? "coin-winner" : ""} ${shown && winner.name.length > 45 ? "coin-long-name" : ""}`}>{shown ? winner.name : "GOOD FORTUNE AWAITS."}</h2>
         <div className="coin-divider"><span />✦<span /></div>
-        {shown ? <motion.div initial={{ opacity: 0, y: reduced ? 0 : 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .7 }}>
+        {shown ? <motion.div initial={reduced ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : .7 }}>
           <p className="coin-rank">CONGRATULATIONS · {rankName(winner.rank)} PRIZE WINNER</p>
           <dl className="coin-customer">
             <div><dt>Car</dt><dd>{winner.vehicle || "Not provided"}</dd></div>

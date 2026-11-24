@@ -1,5 +1,6 @@
--- Run in a NEW dedicated Supabase project. Disable public auth sign-ups.
-create table public.organizers (user_id uuid primary key references auth.users(id));
+-- Run in a NEW dedicated PostgreSQL database or Supabase project.
+create table public.organizers (user_id uuid primary key);
+insert into public.organizers values ('00000000-0000-4000-8000-000000000001');
 create table public.events (
  id uuid primary key, organizer uuid not null references public.organizers(user_id),
  status text not null default 'draft' check(status in ('draft','locked','complete')),
@@ -23,7 +24,7 @@ alter table public.organizers enable row level security;
 alter table public.events enable row level security;
 alter table public.results enable row level security;
 alter table public.audit enable row level security;
--- No browser-access policies: all data flows through authorized server routes.
+-- No browser-access policies: all data flows through the server routes.
 create function public.protect_event() returns trigger language plpgsql as $$
 begin
  if old.status <> 'draft' and (new.branch_draw is distinct from old.branch_draw or new.entries is distinct from old.entries or new.prizes is distinct from old.prizes or new.snapshot_hash is distinct from old.snapshot_hash or new.status='draft') then raise exception 'Locked snapshot is immutable'; end if;

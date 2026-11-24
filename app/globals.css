@@ -511,29 +511,10 @@ footer button {
   font-size: 13px;
   color: var(--green);
 }
-.rehearsal-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #f3efdf;
-  padding: 18px;
-  border-radius: 6px;
-  margin: 20px 0;
-  overflow: hidden;
-}
-.rehearsal-panel iframe {
-  width: 180px;
-  height: 170px;
-  border: 0;
-  flex-shrink: 0;
-  border-radius: 8px;
-}
-.rehearsal-panel h3 {
-  margin-top: 0;
-}
-.rehearsal-panel button {
-  font-size: 13px;
-}
+
+
+
+
 .section-title {
   display: flex;
   gap: 10px;
@@ -704,9 +685,7 @@ td {
   .setup {
     padding: 20px;
   }
-  .rehearsal-panel iframe {
-    display: none;
-  }
+
   .setup .actions button {
     flex: 1;
   }
@@ -749,12 +728,7 @@ td {
   overflow: hidden;
   flex-shrink: 0;
 }
-.rehearsal-panel .ticket-preview iframe {
-  width: 500px;
-  height: 550px;
-  transform: scale(0.36);
-  transform-origin: top left;
-}
+
 .ticket-preview iframe {
   background: var(--paper);
 }
@@ -1042,7 +1016,57 @@ footer {
 @media(prefers-reduced-motion:reduce) { .coin-reveal *, .coin-reveal *::before,.coin-reveal *::after { animation-duration:.01ms!important; animation-delay:0s!important; animation-iteration-count:1!important; }.coin-rain { display:none; } }
 .branch-progress { max-width:1100px; margin:0 auto 12px; padding:22px 28px; border:1px solid #c7b77a55; border-radius:16px; background:#fffdf5; display:flex; align-items:center; justify-content:space-between; gap:24px; }
 .branch-progress h2 { margin:6px 0; font-size:26px; letter-spacing:-.6px; }.branch-progress p { margin:0; font-size:12px; color:#766b51; }.branch-progress .eyebrow { font-size:9px; }
-.branch-list { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; max-width:60%; }.branch-list > button { display:flex; gap:12px; align-items:center; padding:8px 12px; border:1px solid #ddd6bf; border-radius:8px; background:#fffdf8; color:inherit; font:inherit; font-size:12px; cursor:pointer; transition:background .2s,border-color .2s,transform .2s; }.branch-list > button:hover:not(:disabled) { border-color:#c7a34b; transform:translateY(-1px); }.branch-list > button:focus-visible { outline:2px solid #b88d28; outline-offset:2px; }.branch-list > button:disabled { cursor:not-allowed; opacity:.65; }.branch-list small { color:#86733f; }.branch-list [aria-pressed="true"] { background:#f7e7ad; border-color:#c7a34b; font-weight:700; }
+.branch-select { display:flex; flex-direction:column; gap:8px; min-width:240px; font-size:13px; }
+.branch-select select { padding:12px; border:1px solid #c7a34b; border-radius:8px; background:#fffdf8; color:inherit; font:inherit; }
+.winners-download { display:flex; justify-content:center; margin:8px 0 0; }
+.winners-download button { padding:6px 12px; font-size:12px; color:#30291b; background:#fffdf5; border-color:#c7b77a; }
+.immersive .header-right > button { display:none; }
+.participant-import { margin:24px 0; padding:20px 0; border-block:1px solid #ddd6bf; }
+@media(max-width:700px) { .branch-select { margin-top:16px; min-width:0; } .header-right { flex-wrap:wrap; justify-content:flex-end; } .header-right > button:not(.icon-button) { font-size:11px; padding:8px; } }
+
 .immersive .branch-progress { visibility:hidden; }
 .prizes.podium .prize { border-bottom:1px solid var(--line); }
-@media(max-width:700px) { .branch-progress { margin:0 16px 16px; padding:18px; display:block; }.branch-list { max-width:100%; justify-content:flex-start; margin-top:16px; }.branch-list > button { font-size:10px; padding:6px 8px; gap:8px; }.branch-progress h2 { font-size:23px; } }
+@media(max-width:700px) { .branch-progress { margin:0 16px 16px; padding:18px; display:block; }.branch-progress h2 { font-size:23px; } }
+.result-shown:not(.immersive) .stage { height:auto; min-height:300px; padding:24px 0; }
+.result-shown:not(.immersive) .winner-card.paper-fallback { position:relative; top:auto; left:auto; width:min(550px,90%); margin:0 auto; transform:none !important; }
+.result-shown:not(.immersive) .stage .scene,
+.result-shown:not(.immersive) .stage .side-note,
+.result-shown:not(.immersive) .stage .pool-note { visibility:hidden; }
+
+/* The result and its actions occupy separate rows, including on short screens. */
+main.immersive {
+  position:fixed; inset:0; z-index:30; display:grid;
+  grid-template-rows:minmax(min-content,1fr) auto; gap:20px;
+  padding:100px 20px 24px; overflow-y:auto;
+  background:radial-gradient(ellipse at 50% 40%,#5c6651,#2b4134 40%,#10251c);
+}
+main.golden-active { background:radial-gradient(ellipse at 50% 25%,#fff3b9,#fffdf4 35%,#fff 70%); }
+.immersive > .intro,.immersive > .branch-progress,.immersive > .prizes,.immersive > footer { display:none; }
+.immersive .stage { position:relative; inset:auto; height:auto; min-height:280px; width:100%; margin:0; background:none; z-index:auto; }
+.immersive .stage::after { display:none; }
+.immersive .scene { inset:0; }
+.immersive .draw-controls { position:relative; inset:auto; transform:none; width:min(900px,100%); margin:0 auto; align-self:end; }
+.immersive .coin-reveal { position:relative; inset:auto; min-height:100%; overflow:visible; background:transparent; display:grid; place-items:center; }
+.immersive .coin-composition { position:relative; inset:auto; width:100%; padding:12px 0; }
+.immersive .gift-illustration { width:min(440px,36svh,75vw); flex-shrink:0; }
+.immersive .coin-rain { inset:0; }
+.immersive.result-shown .draw-label { display:none; }
+.immersive .text-button { display:inline-block; margin:10px 8px 0; padding:8px 12px; }
+.immersive .winners-download { margin-top:8px; }
+.golden-active .draw-controls { color:#30291b; }
+.event-empty { max-width:680px; margin:32px auto 60px; padding:32px; text-align:center; border:1px solid var(--line); border-radius:16px; }
+.event-empty p { color:#766b51; line-height:1.6; }
+[hidden] { display:none !important; }
+@media(max-width:700px) {
+  main.immersive { padding:86px 16px 20px; gap:16px; }
+  .immersive .coin-composition { padding:0; }
+  .immersive .coin-title { overflow-wrap:anywhere; }
+}
+
+/* Keep the single sound control available throughout the ceremony. */
+.header .sound-toggle { color:inherit; flex-shrink:0; }
+.immersive .header-right { display:flex; margin-right:155px; }
+.immersive .header-right > .sound-toggle { display:inline-flex; }
+@media(max-width:700px) {
+  .immersive .header-right { margin-right:115px; }
+}

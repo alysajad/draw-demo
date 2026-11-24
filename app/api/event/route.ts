@@ -1,4 +1,4 @@
-import { authorized, operate } from "@/lib/server";
+import { sharedOrganizer, operate } from "@/lib/server";
 import { csvResults } from "@/lib/model";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +10,6 @@ export async function POST(request: Request) {
 }
 async function handle(request: Request, post: boolean) {
   try {
-    const user = await authorized(request);
     if (
       post &&
       request.headers.get("origin") &&
@@ -23,7 +22,7 @@ async function handle(request: Request, post: boolean) {
     const action = post ? body.action : "state";
     if (!["state", "create", "import", "lock", "draw", "ack"].includes(action))
       throw new Error("Unknown action");
-    const event = await operate(user, action, body);
+    const event = await operate(sharedOrganizer, action, body);
     if (!post && new URL(request.url).searchParams.has("export") && event)
       return new Response(csvResults(event), {
         headers: {
@@ -40,11 +39,9 @@ async function handle(request: Request, post: boolean) {
     const message = error instanceof Error ? error.message : "Request failed";
     return Response.json(
       {
-        error: message.includes("Unauthorized")
-          ? "Sign in with an invited organizer account."
-          : message,
+        error: message,
       },
-      { status: message === "Unauthorized" ? 401 : 400 },
+      { status: 400 },
     );
   }
 }

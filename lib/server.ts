@@ -1,32 +1,15 @@
 import { Pool, PoolClient } from "pg";
-import { createClient } from "@supabase/supabase-js";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import { Entry, Event, validateEntries, validateBranches, nextDraw, eligibleEntries, branches } from "./model";
 const globalDB = globalThis as unknown as { drawPool?: Pool };
+export const sharedOrganizer = "00000000-0000-4000-8000-000000000001";
 function pool() {
+  if (!process.env.DATABASE_URL)
+    throw new Error("Event storage is not configured. Set DATABASE_URL on the server.");
   return (globalDB.drawPool ??= new Pool({
     connectionString: process.env.DATABASE_URL,
     max: 3,
   }));
-}
-export async function authorized(request: Request) {
-  const token = request.headers.get("authorization")?.replace(/^Bearer /, "");
-  if (!token) throw new Error("Unauthorized");
-  if (!process.env.DATABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_URL)
-    throw new Error("Live service is not configured. Use rehearsal.");
-  const auth = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false } },
-  );
-  const { data, error } = await auth.auth.getUser(token);
-  if (error || !data.user) throw new Error("Unauthorized");
-  const exists = await pool().query(
-    "select 1 from organizers where user_id=$1",
-    [data.user.id],
-  );
-  if (!exists.rowCount) throw new Error("Unauthorized");
-  return data.user.id;
 }
 async function state(db: PoolClient, id: string): Promise<Event> {
   const {

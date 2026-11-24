@@ -1,4 +1,4 @@
-"""Convert the supplied dummy workbook to the fields needed by the rehearsal."""
+"""Convert the supplied dummy workbook to the fields used by automated tests."""
 import collections
 import json
 import pathlib
@@ -32,5 +32,5 @@ with zipfile.ZipFile(root / "samp.xlsx") as workbook:
     assert len({entry["entry_id"] for entry in entries}) == len(entries), "Duplicate ticket ID"
     counts = collections.Counter(entry["showroom"] for entry in entries)
     assert counts and min(counts.values()) >= 3, "Each branch needs three entries"
-    (root / "lib/sample-entries.json").write_text(json.dumps(entries, ensure_ascii=False, indent=2) + "\n")
+    (root / "tests/fixtures/sample-entries.json").write_text(json.dumps(entries, ensure_ascii=False, indent=2) + "\n")
     print(f"Imported {len(entries)} eligible entries: {dict(counts)}")

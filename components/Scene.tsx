@@ -17,7 +17,7 @@ import {
 } from "react";
 import * as THREE from "three";
 import { createTimeline } from "animejs";
-import { ceremonyTiming as timing } from "@/lib/draw-animation";
+import { ceremonyTiming as timing, drumAngle } from "@/lib/draw-animation";
 import { createPaperPhysics, PAPER_COUNT } from "@/lib/paper-physics";
 
 import type { Result } from "@/lib/model";
@@ -217,7 +217,7 @@ function World({
       .add(
         p,
         {
-          spin: Math.PI * 8,
+          spin: drumAngle(timing.fastSpinEnd),
           duration: timing.fastSpinEnd,
           ease: "linear",
         },
@@ -226,7 +226,7 @@ function World({
       .add(
         p,
         {
-          spin: Math.PI * 10,
+          spin: drumAngle(timing.spinEnd),
           duration: timing.spinEnd - timing.fastSpinEnd,
           ease: "outQuad",
         },
@@ -247,7 +247,7 @@ function World({
           duration: 1400,
           ease: "inOutSine",
         },
-        1900,
+        timing.spinEnd - 1400,
       )
       .add(p, { lid: -1.9, duration: 450, ease: "outQuad" }, timing.lidOpen)
       .add(
@@ -563,6 +563,7 @@ export default function Scene({
               },
               { once: true },
             );
+            gl.domElement.dataset.ready = "true";
           }}
         >
           <PerformanceMonitor onDecline={() => setDpr(1)} />

@@ -1,75 +1,18 @@
 export const ceremonyTiming = {
   spinStart: 0,
-  fastSpinEnd: 2000,
-  spinEnd: 3300,
-  lidOpen: 3350,
-  paperRise: 3900,
-  reveal: 5000,
-  firstPrizePause: 0,
+  fastSpinEnd: 3000,
+  spinEnd: 8300,
+  lidOpen: 8350,
+  paperRise: 8900,
+  reveal: 10000,
 };
 
-// All sound is generated locally and is only connected after the sound gesture.
-export function boxSound(context: AudioContext, duration: number) {
-  const bus = context.createGain();
-  bus.gain.value = 0.65;
-  bus.connect(context.destination);
-  const noise = context.createBuffer(
-    1,
-    context.sampleRate * 2,
-    context.sampleRate,
-  );
-  const samples = noise.getChannelData(0);
-  for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
-  const sources: AudioScheduledSourceNode[] = [];
-  const start = context.currentTime;
-  for (let t = ceremonyTiming.spinStart / 1000; t < ceremonyTiming.spinEnd / 1000; t += 0.17 + Math.random() * 0.2) {
-    const paper = context.createBufferSource();
-    paper.buffer = noise;
-    paper.playbackRate.value = 0.65 + Math.random() * 0.7;
-    const filter = context.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.value = 900 + Math.random() * 2500;
-    filter.Q.value = 0.65;
-    const gain = context.createGain();
-    const level = 0.07 + Math.random() * 0.13;
-    gain.gain.setValueAtTime(0, start + t);
-    gain.gain.linearRampToValueAtTime(
-      level * Math.min(1, (ceremonyTiming.spinEnd / 1000 - t) / 2),
-      start + t + 0.025,
-    );
-    gain.gain.exponentialRampToValueAtTime(0.001, start + t + 0.18);
-    paper.connect(filter).connect(gain).connect(bus);
-    paper.start(start + t, Math.random());
-    paper.stop(start + t + 0.22);
-    sources.push(paper);
-  }
-  // Soft cradle resonance, followed by a restrained reveal chord.
-  for (const [offset, frequency, length, level] of [
-    [ceremonyTiming.spinStart / 1000, 78, (ceremonyTiming.spinEnd - ceremonyTiming.spinStart) / 1000, 0.025],
-    [ceremonyTiming.lidOpen / 1000, 180, 0.3, 0.06],
-    [duration - 0.7, 440, 1.2, 0.045],
-    [duration - 0.5, 554.37, 1.2, 0.035],
-    [duration - 0.3, 659.25, 1.4, 0.03],
-  ]) {
-    const tone = context.createOscillator();
-    const gain = context.createGain();
-    tone.frequency.value = frequency;
-    gain.gain.setValueAtTime(0, start + offset);
-    gain.gain.linearRampToValueAtTime(level, start + offset + 0.08);
-    gain.gain.exponentialRampToValueAtTime(0.001, start + offset + length);
-    tone.connect(gain).connect(bus);
-    tone.start(start + offset);
-    tone.stop(start + offset + length + 0.1);
-    sources.push(tone);
-  }
-  return () => {
-    bus.disconnect();
-    sources.forEach((source) => {
-      try {
-        source.stop();
-      } catch {
-        /* Already ended. */
-      }
-    });
-  };
+// Constant initial speed, then a continuous slowdown to an upright stop.
+export function drumAngle(milliseconds: number) {
+  const { fastSpinEnd, spinEnd } = ceremonyTiming;
+  const t = Math.max(0, Math.min(spinEnd, milliseconds));
+  const slowing = spinEnd - fastSpinEnd;
+  const speed = 20 * Math.PI / (fastSpinEnd + slowing / 2);
+  const decelerationTime = Math.max(0, t - fastSpinEnd);
+  return speed * (t - decelerationTime ** 2 / (2 * slowing));
 }

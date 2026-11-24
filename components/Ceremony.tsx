@@ -10,54 +10,32 @@ import {
 import {
   ArrowRight,
   Check,
-  ChevronDown,
   Download,
-  Expand,
   Flower2,
-  Leaf,
-  LockKeyhole,
   Settings2,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import {
-  csvResults,
   Event,
-  parseCSV,
   rankName,
-  sampleRehearsal,
   branches,
   drawSchedule,
   nextDraw,
-  validateBranches,
-  rehearsalDraw,
 } from "@/lib/model";
 import GoldCoinReveal from "./GoldCoinReveal";
+import ParticipantImport from "./ParticipantImport";
+import { saveWorkbook, winnersWorkbook } from "@/lib/spreadsheet";
 const Scene = dynamic(() => import("./Scene"), {
   ssr: false,
   loading: () => <div className="scene-fallback">Preparing the draw box…</div>,
 });
-import { ceremonyTiming as timing, boxSound } from "@/lib/draw-animation";
-const storage = "nippon-onam-branch-rehearsal-v2";
+import { ceremonyTiming as timing } from "@/lib/draw-animation";
 const liveStorage = "nippon-onam-live-event";
-let auth: SupabaseClient | undefined;
-function client() {
-  if (
-    !auth &&
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  )
-    auth = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    );
-  return auth;
-}
+const emptyEvent: Event = { id: "", status: "draft", entries: [], results: [], prizes: ["", "", ""], branch_draw: true };
 export default function Ceremony() {
   const [event, setEvent] = useState<Event | null>(null),
-    [live, setLive] = useState(false),
     [ready, setReady] = useState(false),
     [setup, setSetup] = useState(false),
     [busy, setBusy] = useState(false),
@@ -66,54 +44,65 @@ export default function Ceremony() {
     [revealing, setRevealing] = useState(false),
     [shown, setShown] = useState(false),
     [error, setError] = useState(""),
-    [quality, setQuality] = useState("auto"),
-    [muted, setMuted] = useState(true),
-    [clean, setClean] = useState(false),
-    [signedIn, setSignedIn] = useState(false);
+    [muted, setMuted] = useState(true);
   const [immersive, setImmersive] = useState(false);
   const [coinVisible, setCoinVisible] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState("");
+  const [deadline, setDeadline] = useState(0);
   const [graphicsFailed, setGraphicsFailed] = useState(false);
   const graphicsFailure = useCallback(() => setGraphicsFailed(true), []);
   const reduced = useReducedMotion();
   const gate = useRef(false);
+  const drumClicked = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const audio = useRef<AudioContext | null>(null);
-  const stopAudio = useRef<(() => void) | null>(null);
   const music = useRef<HTMLAudioElement | null>(null);
-  const [musicFile, setMusicFile] = useState<File | null>(null);
-  const [musicUrl, setMusicUrl] = useState("");
-  const [musicError, setMusicError] = useState("");
-  useEffect(() => {
-    if (!musicFile) { setMusicUrl(""); return; }
-    const url = URL.createObjectURL(musicFile);
-    setMusicUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [musicFile]);
   useEffect(() => {
     const player = music.current;
-    if (!player || !musicUrl) return;
+    if (!player) return;
     player.volume = 0.35;
-    if (immersive && !muted) {
-      void player.play().catch(() => setMusicError("Music could not play. Preview the track in event preparation, then try again."));
+    if ((revealing || shown) && !muted) {
+      void player.play().catch(() => {});
     } else player.pause();
-  }, [immersive, muted, musicUrl, setup]);
-  const [email, setEmail] = useState(""),
-    [password, setPassword] = useState(""),
-    [csv, setCsv] = useState(""),
-    [mapping, setMapping] = useState<Record<string, string>>({}),
-    [prizes, setPrizes] = useState(["", "", ""]);
-  const parsedPreview = csv ? parseCSV(csv, mapping) : null;
-  const preview = parsedPreview ? { ...parsedPreview, errors: [...parsedPreview.errors, ...validateBranches(parsedPreview.entries)] } : null;
+  }, [revealing, shown, muted]);
   const pending = event?.results.find((r) => !r.acknowledged);
   useEffect(() => {
     setShown(false);
-    if (pending?.showroom) setSelectedBranch(pending.showroom);
-  }, [pending?.entry_id]);
+    if (!event) return;
+    if (!pending) {
+      if (!gate.current) {
+        timer.current.forEach(clearTimeout);
+        setRevealing(false);
+        setDeadline(0);
+        const attempt = JSON.parse(sessionStorage.getItem(`draw-attempt-${event.id}`) || "null");
+        if (attempt?.resultCount !== event.results.length)
+          sessionStorage.removeItem(`reveal-deadline-${event.id}`);
+      }
+      return;
+    }
+    if (pending.showroom) setSelectedBranch(pending.showroom);
+    const stored = Number(sessionStorage.getItem(`reveal-deadline-${event.id}`));
+    const end = stored || Date.now() + timing.reveal;
+    sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
+    setDeadline(end);
+    setRevealing(true);
+  }, [event?.id, pending?.entry_id]);
+  useEffect(() => {
+    if (!deadline || !revealing) return;
+    const finish = () => {
+      if (!pending) { setPhase("Confirming winner…"); return; }
+      timer.current.forEach(clearTimeout);
+      timer.current = [];
+      setRevealing(false);
+      setShown(true);
+      setPhase("");
+    };
+    const id = setTimeout(finish, Math.max(0, deadline - Date.now()));
+    return () => clearTimeout(id);
+  }, [deadline, pending?.entry_id, revealing]);
   const latest = event?.results.at(-1);
   const branchList = event ? branches(event) : [];
   const activeBranch = event?.branch_draw
-    ? pending?.showroom || (branchList.includes(selectedBranch) ? selectedBranch : branchList[0]) || ""
+    ? pending?.showroom || (branchList.includes(selectedBranch) ? selectedBranch : "") || ""
     : "";
   const next = event ? nextDraw(event, activeBranch) : undefined;
   const rank = next?.rank || 1;
@@ -122,20 +111,16 @@ export default function Ceremony() {
   const complete = event?.status === "complete";
   const request = useCallback(
     async (action = "state", data: Record<string, unknown> = {}) => {
-      const session = await client()?.auth.getSession();
-      const token = session?.data.session?.access_token;
-      if (!token) throw new Error("Sign in with an invited organizer account.");
       const payload = JSON.stringify({ action, ...data });
       if (new Blob([payload]).size > 4_000_000)
         throw new Error(
-          "Import exceeds the hosting limit. Reduce the CSV size and retry.",
+          "Import exceeds the hosting limit. Reduce the participant data size and retry.",
         );
       const response = await fetch("/api/event", {
         signal: AbortSignal.timeout(20000),
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: payload,
       });
@@ -146,78 +131,31 @@ export default function Ceremony() {
     [],
   );
   useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(storage);
-      setEvent(saved ? JSON.parse(saved) : sampleRehearsal());
-    } catch {
-      setEvent(sampleRehearsal());
-    }
-    const savedLiveId = sessionStorage.getItem(liveStorage);
-    setReady(!savedLiveId);
-    if (savedLiveId) {
-      setLive(true);
-      setEvent(null);
-    }
-    const c = client();
-    if (!c && savedLiveId) {
-      setError(
-        "Live service is not configured. Restore the connection to recover this event.",
-      );
-      setSetup(true);
-    }
-    c?.auth.getSession().then(async ({ data }) => {
-      setSignedIn(!!data.session);
-      const savedId = savedLiveId;
-      if (savedId) {
-        setLive(true);
-        setEvent(null);
-        setReady(false);
-        try {
-          const recovered = await request("state", { id: savedId });
-          setEvent(recovered);
-          if (recovered) setPrizes(recovered.prizes);
-        } catch (e) {
-          setError(e instanceof Error ? e.message : "Unable to recover event");
-          setSetup(true);
-        } finally {
-          setReady(true);
-        }
-      }
-    });
-    const subscription = c?.auth.onAuthStateChange((_event, session) =>
-      setSignedIn(!!session),
-    ).data.subscription;
+    const savedId = sessionStorage.getItem(liveStorage);
+    let active = true;
+    request("state", savedId ? { id: savedId } : {})
+      .then(restored => { if (active) setEvent(restored); })
+      .catch(e => { if (active) setError(e instanceof Error ? e.message : "Unable to load event."); })
+      .finally(() => { if (active) setReady(true); });
     return () => {
-      subscription?.unsubscribe();
+      active = false;
       timer.current.forEach(clearTimeout);
-      stopAudio.current?.();
     };
-  }, []);
+  }, [request]);
   useEffect(() => {
-    if (ready && !live && event) {
-      sessionStorage.setItem(storage, JSON.stringify(event));
-    }
-    if (ready && live && event) sessionStorage.setItem(liveStorage, event.id);
-  }, [event, live, ready]);
+    if (ready && event) sessionStorage.setItem(liveStorage, event.id);
+  }, [event?.id, ready]);
   useEffect(() => {
-    if (!live) return;
+    if (!event) return;
     const refresh = () => {
       if (!gate.current)
-        request("state", {
-          id: event?.id || sessionStorage.getItem(liveStorage),
-        })
-          .then((e) => {
-            if (e) setEvent(e);
-          })
-          .catch((e) => setError(e.message));
+        request("state", { id: event.id }).then(e => { if (e) setEvent(e); })
+          .catch(e => setError(e.message));
     };
     window.addEventListener("focus", refresh);
     const id = setInterval(refresh, 5000);
-    return () => {
-      window.removeEventListener("focus", refresh);
-      clearInterval(id);
-    };
-  }, [live, event?.id, request]);
+    return () => { window.removeEventListener("focus", refresh); clearInterval(id); };
+  }, [event?.id, request]);
   async function work(task: () => Promise<void>) {
     if (gate.current) return;
     gate.current = true;
@@ -238,7 +176,6 @@ export default function Ceremony() {
     document.body.style.overflow = "hidden";
     const escape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        stopReveal();
         setImmersive(false);
       }
     };
@@ -248,71 +185,65 @@ export default function Ceremony() {
       window.removeEventListener("keydown", escape);
     };
   }, [immersive]);
-  function stopReveal() {
-    setImmersive(true);
-    stopAudio.current?.();
-    timer.current.forEach(clearTimeout);
-    timer.current = [];
-    setRevealing(false);
-    setShown(true);
-    setPhase("");
-  }
-  function play(resultRank: number) {
+  function play(end = Date.now() + timing.reveal) {
+    if (!event) return;
+    drumClicked.current = false;
+    sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
+    setDeadline(end);
     setCoinVisible(false);
     setImmersive(true);
     setShown(false);
     setRevealing(true);
     setSequence((s) => s + 1);
-    setPhase("A little anticipation…");
+    setPhase("Good fortune is on its way.");
     timer.current.forEach(clearTimeout);
-    stopAudio.current?.();
-    const duration =
-      timing.reveal + (resultRank === 1 ? timing.firstPrizePause : 0);
-    if (!muted && !musicUrl && audio.current && !reduced)
-      stopAudio.current = boxSound(audio.current, duration / 1000);
-    if (reduced) {
-      timer.current.push(setTimeout(stopReveal, 400));
-      return;
-    }
+    timer.current = [];
+    if (reduced) return;
+    const elapsed = timing.reveal - Math.max(0, end - Date.now());
     timer.current.push(
-      setTimeout(
-        () => setPhase("Good fortune is on its way."),
-        timing.spinStart,
-      ),
-      setTimeout(
-        () => setPhase("One winner. A golden moment."),
-        timing.lidOpen,
-      ),
-      setTimeout(() => setCoinVisible(true), timing.paperRise),
-      setTimeout(stopReveal, duration),
+      setTimeout(() => setPhase("One winner. A golden moment."), Math.max(0, timing.lidOpen - elapsed)),
+      setTimeout(() => setCoinVisible(true), Math.max(0, timing.paperRise - elapsed)),
     );
   }
+  function revealNow() {
+    if (!event || !revealing) return;
+    const end = Date.now();
+    sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
+    setDeadline(end);
+    if (!pending) setPhase("Confirming winner…");
+  }
   function draw() {
-    if (!event) return;
+    if (!event || !next || pending || revealing || gate.current) return;
     void work(async () => {
-      let updated: Event;
-      if (live) {
-        const keyName = `draw-key-${event.id}-${event.results.length}-${rank}`;
-        const key = sessionStorage.getItem(keyName) || crypto.randomUUID();
-        sessionStorage.setItem(keyName, key);
-        updated = (await request("draw", { id: event.id, rank, branch: activeBranch, key }))!;
-      } else updated = rehearsalDraw(event, activeBranch);
-      setEvent(updated);
-      const winner = updated.results.find((r) => !r.acknowledged);
-      if (winner) play(winner.rank);
+      const attemptName = `draw-attempt-${event.id}`;
+      const stored = sessionStorage.getItem(attemptName);
+      const previous = stored ? JSON.parse(stored) : null;
+      const attempt = previous?.resultCount === event.results.length ? previous : {
+        resultCount: event.results.length, key: crypto.randomUUID(), rank, branch: activeBranch, deadline: Date.now() + timing.reveal,
+      };
+      sessionStorage.setItem(attemptName, JSON.stringify(attempt));
+      setSelectedBranch(attempt.branch);
+      play(attempt.deadline);
+      try {
+        const updated = (await request("draw", { id: event.id, rank: attempt.rank, branch: attempt.branch, key: attempt.key }))!;
+        setEvent(updated);
+      } catch (error) {
+        timer.current.forEach(clearTimeout);
+        setRevealing(false);
+        setImmersive(false);
+        setSequence(0);
+        throw error;
+      }
     });
   }
   function acknowledge() {
     if (!event || !pending) return;
     void work(async () => {
-      if (live)
-        setEvent(await request("ack", { id: event.id, rank: pending.rank, entry_id: pending.entry_id }));
-      else
-        setEvent({
-          ...event,
-          status: nextDraw(event) ? "locked" : "complete",
-          results: event.results.map((r) => ({ ...r, acknowledged: true })),
-        });
+      setEvent(await request("ack", { id: event.id, rank: pending.rank, entry_id: pending.entry_id }));
+      sessionStorage.removeItem(`draw-attempt-${event.id}`);
+      sessionStorage.removeItem(`reveal-deadline-${event.id}`);
+      if (!nextDraw(event, activeBranch)) setSelectedBranch("");
+      setDeadline(0);
       setShown(false);
       setSequence(0);
       setCoinVisible(false);
@@ -320,39 +251,22 @@ export default function Ceremony() {
     });
   }
   function download() {
-    if (!event) return;
-    const url = URL.createObjectURL(
-      new Blob(["\uFEFF" + csvResults(event)], {
-        type: "text/csv;charset=utf-8",
-      }),
-    );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${live ? "onam" : "rehearsal"}-results.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!event || revealing) return;
+    void work(async () => {
+      const revealed = { ...event, results: event.results.filter(r => r.acknowledged || (shown && r.entry_id === pending?.entry_id)) };
+      saveWorkbook(await winnersWorkbook(revealed), "onam-winners.xlsx");
+    });
   }
-  async function fullscreen() {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else await document.documentElement.requestFullscreen();
-    } catch {
-      setError(
-        "Fullscreen is unavailable in this browser. Use the browser presentation controls.",
-      );
-    }
-  }
-  const winner = pending || latest;
+  const winner = pending || (!revealing ? latest : undefined);
   return (
     <MotionConfig reducedMotion="user">
       <main
-        className={`${clean ? "clean" : ""} ${immersive ? "immersive" : ""} ${shown ? "result-shown" : ""} ${graphicsFailed ? "graphics-failed" : ""} ${immersive && (coinVisible || shown) ? "golden-active" : ""}`}
+        className={`${immersive ? "immersive" : ""} ${shown ? "result-shown" : ""} ${graphicsFailed ? "graphics-failed" : ""} ${immersive && (coinVisible || shown) && winner ? "golden-active" : ""}`}
       >
         {immersive && (
           <button
             className="exit-ceremony"
             onClick={() => {
-              stopReveal();
               setImmersive(false);
             }}
             aria-label="Exit immersive ceremony"
@@ -369,15 +283,21 @@ export default function Ceremony() {
             </span>
           </a>
           <div className="header-right">
-            <span className={`mode ${live ? "live" : ""}`}>
-              <i />
-              {live ? "Private event" : "Rehearsal"}
-            </span>
+            <button
+              className="icon-button sound-toggle"
+              aria-label={muted ? "Enable sound" : "Mute sound"}
+              aria-pressed={!muted}
+              title={muted ? "Sound off" : "Sound on"}
+              onClick={() => setMuted(value => !value)}
+            >
+              {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            </button>
+            <button disabled={revealing || busy || !!pending} onClick={() => setSetup(true)}>Upload Excel sheet</button>
             <button
               className="icon-button"
               aria-label="Open event preparation"
               onClick={() => setSetup(true)}
-              disabled={revealing}
+              disabled={revealing || busy || !!pending}
             >
               <Settings2 size={18} />
             </button>
@@ -395,21 +315,26 @@ export default function Ceremony() {
             Nippon Toyota <span>·</span> Onam Lucky Draw
           </p>
         </section>
-        {event?.branch_draw && <section className="branch-progress" aria-label="Branch progress">
-          <div><span className="eyebrow">{complete ? "ALL BRANCHES COMPLETE" : `BRANCH ${branchList.indexOf(activeBranch) + 1} OF ${branchList.length}`}</span>
-            <h2>{complete ? "Every branch. A golden moment." : activeBranch}</h2>
-            <p>{event.results.filter(r => r.acknowledged).length} of {totalPrizes} winners revealed · 3rd → 2nd → 1st per branch</p></div>
-          <div className="branch-list">{branchList.map(branch => <button
-            type="button"
-            key={branch}
-            aria-pressed={branch === activeBranch}
-            disabled={!!pending || revealing || busy}
-            onClick={() => setSelectedBranch(branch)}
-          >
-            {branch}<small>{event.results.filter(r => r.showroom === branch && r.acknowledged).length}/3</small>
-          </button>)}</div>
+        {!event && <section className="event-empty" aria-live="polite">
+          <h2>{!ready ? "Loading event…" : "Ready for a little luck?"}</h2>
+          <p>Upload the participant sheet, then select a branch to draw its three winners.</p>
+          <button className="primary" disabled={!ready} onClick={() => setSetup(true)}>Prepare event</button>
+          {error && <p className="error" role="alert">{error}</p>}
         </section>}
-        <section className="stage" aria-label="Lucky draw ceremony">
+        {event?.branch_draw && <section className="branch-progress" aria-label="Branch progress">
+          <div><span className="eyebrow">{complete ? "ALL BRANCHES COMPLETE" : (activeBranch ? `BRANCH ${branchList.indexOf(activeBranch) + 1} OF ${branchList.length}` : `${branchList.length} BRANCHES`)}</span>
+            <h2>{complete ? "Every branch. A golden moment." : activeBranch || "Select a branch to begin"}</h2>
+            <p>{event.results.filter(r => r.acknowledged).length} of {totalPrizes} winners revealed · 3rd → 2nd → 1st per branch</p></div>
+          <label className="branch-select">Select branch
+            <select aria-label="Select branch" value={activeBranch} disabled={!!pending || revealing || busy} onChange={e => setSelectedBranch(e.target.value)}>
+              <option value="">Select branch</option>
+              {branchList.map(branch => <option key={branch} value={branch}>
+                {branch} — {event.results.filter(r => r.showroom === branch && r.acknowledged).length}/3
+              </option>)}
+            </select>
+          </label>
+        </section>}
+        <section className="stage" aria-label="Lucky draw ceremony" hidden={!event}>
           <div className="side-note">
             <Flower2 size={25} />
             <span>
@@ -417,11 +342,12 @@ export default function Ceremony() {
               <br />A lot to celebrate.
             </span>
           </div>
-          <div className={`scene ${sequence > 0 ? "scene-closeup" : ""}`}>
-            {!(immersive && (coinVisible || shown)) && <Scene
+          <div className={`scene ${sequence > 0 ? "scene-closeup" : ""}`} onClick={e => { if (revealing && e.detail === 1) drumClicked.current = true; }}
+            onDoubleClick={() => { if (drumClicked.current) revealNow(); drumClicked.current = false; }}>
+            {event && !(immersive && (coinVisible || shown) && winner) && <Scene
               sequence={sequence}
               reduced={!!reduced}
-              quality={quality}
+              quality="auto"
               shown={shown}
               winner={winner}
               prize={winner ? event?.prizes[winner.rank - 1] || "" : ""}
@@ -429,7 +355,7 @@ export default function Ceremony() {
             />}
           </div>
           <div className="pool-note">
-            <span className="pool-number">{(event?.branch_draw && !complete ? event.entries.filter(e => e.showroom === activeBranch).length : event?.entries.length) || "·"}</span>
+            <span className="pool-number">{(event?.branch_draw && !complete && activeBranch ? event.entries.filter(e => e.showroom === activeBranch).length : event?.entries.length) || "·"}</span>
             <span>
               ENTRIES
               <br />
@@ -450,7 +376,7 @@ export default function Ceremony() {
             {shown && winner && !complete && (
               <motion.div
                 className={`winner-card ${immersive ? "paper-accessibility" : "paper-fallback"}`}
-                initial={{ opacity: 0, y: reduced ? 0 : 18 }}
+                initial={reduced ? false : { opacity: 0, y: 18 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 role="status"
@@ -491,7 +417,7 @@ export default function Ceremony() {
             </div>
           )}
         </section>
-        <section className="draw-controls" aria-live="polite">
+        <section className="draw-controls" aria-live="polite" hidden={!event}>
           {complete ? (
             <>
               <span className="eyebrow">
@@ -499,11 +425,8 @@ export default function Ceremony() {
               </span>
               <h2>Here's to your next great journey.</h2>
               <div className="actions">
-                <button onClick={download}>
-                  <Download size={16} /> Download results
-                </button>
-                <button onClick={() => setClean(!clean)}>
-                  {clean ? "Exit screenshot view" : "Screenshot view"}
+                <button disabled={busy} onClick={download}>
+                  <Download size={16} /> Download winners sheet
                 </button>
               </div>
             </>
@@ -517,17 +440,10 @@ export default function Ceremony() {
                     ? shown
                       ? "A moment worth celebrating."
                       : "A saved winner is ready to reveal."
-                    : `${activeBranch ? activeBranch + " · " : ""}${rankName(Math.max(rank, 1))} PRIZE${event?.prizes[rank - 1] ? ` · ${event.prizes[rank - 1]}` : ""}`}
+                    : event?.branch_draw && !activeBranch ? "Select a branch to draw its three winners." : `${activeBranch ? activeBranch + " · " : ""}${rankName(Math.max(rank, 1))} PRIZE${event?.prizes[rank - 1] ? ` · ${event.prizes[rank - 1]}` : ""}`}
               </div>
               {revealing ? (
-                <button
-                  className="primary"
-                  onClick={() => {
-                    stopReveal();
-                  }}
-                >
-                  Show saved result <ArrowRight size={18} />
-                </button>
+                <><p role="status">{phase === "Confirming winner…" ? "Waiting for the saved result." : "Double-click the drum to reveal now."}</p><button className="text-button" onClick={e => { if (e.detail < 2) revealNow(); }}>Reveal now</button></>
               ) : pending ? (
                 shown ? (
                   <>
@@ -543,7 +459,7 @@ export default function Ceremony() {
                     </motion.button>
                     <button
                       className="text-button"
-                      onClick={() => play(pending.rank)}
+                      disabled={busy || revealing} onClick={() => play()}
                     >
                       Replay reveal
                     </button>
@@ -552,17 +468,11 @@ export default function Ceremony() {
                   <div className="actions">
                     <button
                       className="primary"
-                      onClick={() => play(pending.rank)}
+                      disabled={busy || revealing} onClick={() => play()}
                     >
                       Reveal saved winner <ArrowRight size={18} />
                     </button>
-                    <button
-                      onClick={() => {
-                        stopReveal();
-                      }}
-                    >
-                      Show saved result
-                    </button>
+
                   </div>
                 )
               ) : (
@@ -574,21 +484,20 @@ export default function Ceremony() {
                 >
                   {busy
                     ? "Saving the winner…"
-                    : next ? `Draw ${rankName(rank)} prize` : "Branch draw complete"}
+                    : next ? `Draw ${rankName(rank)} prize` : activeBranch ? "Branch draw complete" : "Select branch to draw"}
                   <ArrowRight size={18} />
                 </motion.button>
               )}
-              <p className="control-hint">
-                {live
-                  ? "Every entry. An equal chance."
-                  : "samp.xlsx · Dummy rehearsal · No live winners"}
-              </p>
+
             </>
           )}
+        {!complete && !revealing && event?.results.some(r => r.acknowledged || (shown && r.entry_id === pending?.entry_id)) && (
+          <div className="winners-download"><button disabled={busy} onClick={download}><Download size={16} /> Download winners sheet</button></div>
+        )}
           {error && (
             <p className="error" role="alert">
               {error}{" "}
-              {live && (
+              {ready && (
                 <button
                   onClick={() =>
                     void work(async () => {
@@ -609,6 +518,7 @@ export default function Ceremony() {
         </section>
         <section
           className={`prizes ${complete ? "podium" : ""}`}
+          hidden={!event}
           aria-label="Prize winners"
         >
           {(complete ? branchList : [activeBranch]).flatMap(branch => (complete ? [2, 1, 3] : [3, 2, 1]).map(r => ({ branch, r }))).map(({ branch, r }) => {
@@ -648,56 +558,7 @@ export default function Ceremony() {
             );
           })}
         </section>
-        <footer>
-          <span>
-            <Leaf size={14} /> Together, this Onam.
-          </span>
-          <div>
-            <button
-              onClick={() => {
-                if (muted) {
-                  audio.current ??= new AudioContext();
-                  void audio.current.resume();
-                } else {
-                  void audio.current?.suspend();
-                }
-                setMuted(!muted);
-              }}
-              aria-label={muted ? "Enable sound" : "Mute sound"}
-            >
-              {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-              <span>Sound {muted ? "off" : "on"}</span>
-            </button>
-            <label className="quality">
-              <select
-                aria-label="Presentation quality"
-                value={quality}
-                onChange={(e) => setQuality(e.target.value)}
-              >
-                <option value="auto">Auto quality</option>
-                <option value="low">Low quality</option>
-              </select>
-              <ChevronDown size={12} />
-            </label>
-            <button onClick={fullscreen}>
-              <Expand size={15} />
-              <span>Fullscreen</span>
-            </button>
-          </div>
-        </footer>
-        <audio
-          ref={music}
-          src={musicUrl || undefined}
-          loop
-          muted={muted}
-          preload="auto"
-          onError={() => setMusicError("This track could not be loaded. Choose a supported MP3 or WAV file.")}
-        />
-        {clean && (
-          <button className="exit-clean" onClick={() => setClean(false)}>
-            Exit screenshot view
-          </button>
-        )}
+        <audio ref={music} src="/draw-music.mp3" loop muted={muted} preload="auto" />
         {setup && (
           <div
             className="modal-backdrop"
@@ -742,377 +603,29 @@ export default function Ceremony() {
                   <X />
                 </button>
               </div>
-              <div className="rehearsal-panel">
-                <div>
-                  <h3>A little practice. A perfect moment.</h3>
-                  <p>Use samp.xlsx: 43 dummy entries, four branches, three prizes per branch.</p>
-                  <button
-                    disabled={busy}
-                    onClick={() => {
-                      sessionStorage.removeItem(liveStorage);
-                      setLive(false);
-                      setEvent(sampleRehearsal());
-                      setShown(false);
-                      setError("");
-                      setSetup(false);
-                    }}
-                  >
-                    Restart sample rehearsal <ArrowRight size={15} />
-                  </button>
-                </div>
-                <div className="ticket-preview">
-                  <iframe
-                    src="/hairline-tickets.html"
-                    title="Interactive ticket tray"
-                    loading="lazy"
-                  />
-                </div>
-              </div>
-              <h3 className="section-title">Draw music</h3>
-              <label>
-                Kerala lottery music file
-                <input type="file" accept="audio/*" onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  setMusicError("");
-                  setMusicFile(file);
-                  setMuted(false);
-                }} />
-              </label>
-              <p className="notice">Choose the recording to loop during the draw and winner reveal. Select it again after refreshing this page.</p>
-              {musicFile && <>
-                <p>{musicFile.name}</p>
-                <div className="actions">
-                  <button onClick={() => {
-                    setMuted(false);
-                    if (music.current) {
-                      music.current.muted = false;
-                      music.current.volume = 0.35;
-                      void music.current.play().catch(() => setMusicError("Unable to play this track. Choose another audio file."));
-                    }
-                  }}>Preview music</button>
-                  <button onClick={() => music.current?.pause()}>Stop preview</button>
-                  <button onClick={() => { music.current?.pause(); setMusicFile(null); setMusicError(""); }}>Remove music</button>
-                </div>
+              {(!event || event.status === "draft") && <ParticipantImport
+                key={event?.id || "new"} event={event || emptyEvent} busy={busy || !ready}
+                save={(entries, descriptions) => work(async () => {
+                  const current = event || await request("create");
+                  if (!current) throw new Error("Unable to create event.");
+                  try {
+                    setEvent(await request("import", { id: current.id, entries, prizes: descriptions, branch_draw: true }));
+                  } catch (error) {
+                    setEvent(current);
+                    throw error;
+                  }
+                })}
+                lock={() => work(async () => {
+                  if (!event) return;
+                  setEvent(await request("lock", { id: event.id })); setSelectedBranch(""); setSetup(false);
+                })}
+              />}
+              {event && event.status !== "draft" && <>
+                <p className="notice">Entries are frozen. Create a separate event to upload another sheet.</p>
+                <button disabled={busy} onClick={() => void work(async () => {
+                  setEvent(await request("create")); setShown(false); setSelectedBranch("");
+                })}>Create separate event</button>
               </>}
-              {musicError && <p className="error" role="alert">{musicError}</p>}
-              <h3 className="section-title">
-                <LockKeyhole size={17} /> Live event preparation
-              </h3>
-              {!client() ? (
-                <p className="notice">
-                  Live draws need a dedicated Supabase connection. Rehearsal is
-                  ready to use. See the project README for setup.
-                </p>
-              ) : !signedIn ? (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void work(async () => {
-                      const result = await client()!.auth.signInWithPassword({
-                        email,
-                        password,
-                      });
-                      if (result.error) throw result.error;
-                      setPassword("");
-                      const saved = await request();
-                      setLive(true);
-                      setEvent(saved);
-                      if (saved) setPrizes(saved.prizes);
-                    });
-                  }}
-                >
-                  <p>Sign in with your invited organizer account.</p>
-                  <label>
-                    Email
-                    <input
-                      type="email"
-                      autoComplete="username"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label>
-                    Password
-                    <input
-                      type="password"
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                  </label>
-                  <button className="primary" disabled={busy}>
-                    Sign in
-                  </button>
-                </form>
-              ) : (
-                <>
-                  <details>
-                    <summary>Set organizer password</summary>
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void work(async () => {
-                          const result = await client()!.auth.updateUser({
-                            password,
-                          });
-                          if (result.error) throw result.error;
-                          setPassword("");
-                          setError("Password updated.");
-                        });
-                      }}
-                    >
-                      <label>
-                        New password
-                        <input
-                          type="password"
-                          autoComplete="new-password"
-                          minLength={12}
-                          required
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                        />
-                      </label>
-                      <button disabled={busy}>Save password</button>
-                    </form>
-                  </details>
-                  <div className="actions">
-                    <button
-                      disabled={busy}
-                      onClick={() =>
-                        void work(async () => {
-                          const saved = await request();
-                          setLive(true);
-                          setEvent(saved);
-                          if (saved) setPrizes(saved.prizes);
-                        })
-                      }
-                    >
-                      Load live event
-                    </button>
-                    <button
-                      disabled={busy}
-                      onClick={() =>
-                        void work(async () => {
-                          setEvent(await request("create"));
-                          setLive(true);
-                          setPrizes(["", "", ""]);
-                          setCsv("");
-                          setShown(false);
-                        })
-                      }
-                    >
-                      Create separate event
-                    </button>
-                    <button
-                      onClick={() =>
-                        void work(async () => {
-                          await client()!.auth.signOut();
-                          sessionStorage.removeItem(liveStorage);
-                          setLive(false);
-                          setEvent(sampleRehearsal());
-                          setShown(false);
-                        })
-                      }
-                    >
-                      Sign out
-                    </button>
-                  </div>
-                  {live && event && (
-                    <>
-                      <p className="notice">
-                        {event.status === "draft"
-                          ? "Draft · upload, review, then lock."
-                          : `Event ${event.status}. Entries and prizes are frozen.`}
-                      </p>
-                      {event.status === "draft" ? (
-                        <>
-                          <label>
-                            Participant CSV
-                            <input
-                              type="file"
-                              accept=".csv,text/csv"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  if (file.size > 8_000_000) {
-                                    setError("CSV must be smaller than 8 MB.");
-                                    return;
-                                  }
-                                  setCsv(await file.text());
-                                  setMapping({});
-                                }
-                              }}
-                            />
-                          </label>
-                          <a href="/participants-example.csv" download>
-                            Download CSV template
-                          </a>
-                          {preview && (
-                            <>
-                              <div className="mapping">
-                                {[
-                                  "entry_id",
-                                  "name",
-                                  "showroom",
-                                  "vehicle",
-                                  "mobile",
-                                ].map((k) => (
-                                  <label key={k}>
-                                    {k}
-                                    <select
-                                      value={
-                                        mapping[k] ||
-                                        (preview.headers.includes(k) ? k : "")
-                                      }
-                                      onChange={(e) =>
-                                        setMapping({
-                                          ...mapping,
-                                          [k]: e.target.value,
-                                        })
-                                      }
-                                    >
-                                      <option value="">Choose column</option>
-                                      {preview.headers.map((h) => (
-                                        <option key={h}>{h}</option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                ))}
-                              </div>
-                              <p>
-                                {preview.entries.length} entries ·{" "}
-                                {preview.errors.length} errors
-                              </p>
-                              {preview.errors.slice(0, 8).map((e, i) => (
-                                <p className="error" key={i}>
-                                  {e}
-                                </p>
-                              ))}
-                              {preview.warnings.map((w) => (
-                                <p className="notice" key={w}>
-                                  {w}
-                                </p>
-                              ))}
-                              <div className="table-wrap">
-                                <table>
-                                  <thead>
-                                    <tr>
-                                      <th>Entry ID</th>
-                                      <th>Name</th>
-                                      <th>Showroom</th>
-                                      <th>Car</th>
-                                      <th>Mobile no.</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {preview.entries
-                                      .slice(0, 50)
-                                      .map((entry, i) => (
-                                        <tr key={i}>
-                                          <td>{entry.entry_id}</td>
-                                          <td>{entry.name}</td>
-                                          <td>{entry.showroom}</td>
-                                          <td>{entry.vehicle || "Not provided"}</td>
-                                          <td>{entry.mobile || "Not provided"}</td>
-                                        </tr>
-                                      ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                              <small>
-                                Preview shows the first 50 rows. All rows are
-                                validated.
-                              </small>
-                            </>
-                          )}
-                          {[3, 2, 1].map((r) => (
-                            <label key={r}>
-                              {rankName(r)} prize description (optional)
-                              <input
-                                maxLength={200}
-                                value={prizes[r - 1]}
-                                onChange={(e) =>
-                                  setPrizes(
-                                    prizes.map((p, i) =>
-                                      i === r - 1 ? e.target.value : p,
-                                    ),
-                                  )
-                                }
-                              />
-                            </label>
-                          ))}
-                          <div className="actions">
-                            <button
-                              disabled={
-                                busy || !preview || !!preview.errors.length
-                              }
-                              onClick={() =>
-                                void work(async () =>
-                                  setEvent(
-                                    await request("import", {
-                                      id: event.id,
-                                      entries: preview!.entries,
-                                      prizes,
-                                      branch_draw: true,
-                                    }),
-                                  ),
-                                )
-                              }
-                            >
-                              Save reviewed entries
-                            </button>
-                            <button
-                              className="primary"
-                              disabled={
-                                busy ||
-                                event.entries.length < 3 ||
-                                JSON.stringify(prizes) !==
-                                  JSON.stringify(event.prizes) ||
-                                (!!preview &&
-                                  JSON.stringify(preview.entries) !==
-                                    JSON.stringify(event.entries))
-                              }
-                              onClick={() =>
-                                void work(async () => {
-                                  setEvent(
-                                    await request("lock", { id: event.id }),
-                                  );
-                                  setSetup(false);
-                                })
-                              }
-                            >
-                              Lock live event <LockKeyhole size={15} />
-                            </button>
-                          </div>
-                          <p>
-                            Locking freezes {event.entries.length} saved entries
-                            and prize descriptions. Winners cannot be redrawn.
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <p>
-                            {event.entries.length} frozen entries ·{" "}
-                            {event.results.length}/{drawSchedule(event).length} winners committed
-                          </p>
-                          <button
-                            className="primary"
-                            onClick={() => {
-                              setShown(false);
-                              setSetup(false);
-                            }}
-                          >
-                            Open ceremony <ArrowRight size={16} />
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
               {error && (
                 <p className="error" role="alert">
                   {error}

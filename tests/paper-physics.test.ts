@@ -1,16 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ceremonyTiming } from "../lib/draw-animation";
+import { ceremonyTiming, drumAngle } from "../lib/draw-animation";
 import { createPaperPhysics, PAPER_COUNT } from "../lib/paper-physics";
 test("folded papers stay inside the rotating collider and settle under gravity", async () => {
   const simulation = await createPaperPhysics();
   try {
     assert.equal(simulation.bodies.length, PAPER_COUNT);
     for (let frame = 0; frame < 840; frame++) {
-      const t = Math.min(1, Math.max(0, (frame / 60 * 1000 - ceremonyTiming.spinStart) / (ceremonyTiming.spinEnd - ceremonyTiming.spinStart)));
-      const angle = t < 0.61
-        ? 8 * Math.PI * (t / 0.61)
-        : 8 * Math.PI + 2 * Math.PI * (1 - (1 - (t - 0.61) / 0.39) ** 2);
+      const angle = drumAngle(frame / 60 * 1000);
       simulation.step(angle, 1 / 60);
       for (const body of simulation.bodies) {
         const p = body.translation();
@@ -22,7 +19,7 @@ test("folded papers stay inside the rotating collider and settle under gravity",
         );
       }
     }
-    for (let i = 0; i < 240; i++) simulation.step(8 * Math.PI, 1 / 120);
+    for (let i = 0; i < 240; i++) simulation.step(drumAngle(ceremonyTiming.spinEnd), 1 / 120);
     const height =
       simulation.bodies.reduce((sum, b) => sum + b.translation().y, 0) /
       PAPER_COUNT;
@@ -54,4 +51,16 @@ test("stalled animation frames cannot teleport the collider through paper", asyn
   } finally {
     sim.dispose();
   }
+});
+
+test("drum starts fast, slows continuously and stops before the ten-second reveal", () => {
+  const speed = (ms: number) => (drumAngle(ms + 1) - drumAngle(ms)) * 1000;
+  assert.equal(ceremonyTiming.reveal, 10000);
+  assert.ok(Math.abs(speed(1000) - speed(2999)) < .01);
+  assert.ok(Math.abs(speed(2999) - speed(3000)) < .01);
+  assert.ok(speed(3500) > speed(5000));
+  assert.ok(speed(5000) > speed(7000));
+  assert.ok(speed(7000) > speed(8200));
+  assert.equal(speed(8300), 0);
+  assert.equal(drumAngle(10000), 20 * Math.PI);
 });
