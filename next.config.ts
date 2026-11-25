@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 const config: NextConfig = {
   turbopack: { root: process.cwd() },
   poweredByHeader: false,
+  // PostgreSQL reads this certificate via DATABASE_URL, outside static tracing.
+  outputFileTracingIncludes: {
+    "/api/event": ["./supabase/prod-ca-2021.crt"],
+  },
   async headers() {
     return [
       {
