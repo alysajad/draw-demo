@@ -528,6 +528,7 @@ class Boundary extends Component<
   }
 }
 export default function Scene({
+  active,
   sequence,
   duration,
   mediaTime,
@@ -538,6 +539,7 @@ export default function Scene({
   prize,
   onFailure,
 }: {
+  active: boolean;
   sequence: number;
   duration: number;
   mediaTime: () => number | null;
@@ -565,7 +567,7 @@ export default function Scene({
         fallback
       ) : (
         <Canvas
-          frameloop="demand"
+          frameloop={active ? "demand" : "never"}
           dpr={quality === "low" ? 1 : dpr}
           camera={{ position: [3.2, 3.1, 6.8], fov: 36 }}
           gl={{ antialias: true, alpha: true }}

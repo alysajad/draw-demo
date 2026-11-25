@@ -1,6 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   AnimatePresence,
   MotionConfig,
@@ -33,7 +34,7 @@ const Scene = dynamic(() => import("./Scene"), {
   ssr: false,
   loading: () => <div className="scene-fallback">Preparing the draw box…</div>,
 });
-import { ceremonyTiming as timing } from "@/lib/draw-animation";
+import { ceremonyTiming as timing, drawAudio } from "@/lib/draw-animation";
 const liveStorage = "nippon-onam-live-event";
 export default function Ceremony({ audioAvailable = false }: { audioAvailable?: boolean }) {
   const [event, setEvent] = useState<Event | null>(null),
@@ -63,7 +64,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
   const music = useRef<HTMLAudioElement | null>(null);
   const audioRunning = useRef(false);
   const playbackRequest = useRef(0);
-  const mediaTime = useCallback(() => audioRunning.current && music.current ? music.current.currentTime * 1000 : null, []);
+  const mediaTime = useCallback(() => audioRunning.current && music.current ? music.current.currentTime / drawAudio.playbackRate * 1000 : null, []);
   useEffect(() => {
     if (music.current) music.current.muted = muted;
   }, [muted]);
@@ -73,7 +74,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
     const failed = () => { setAudioFailed(true); setAudioReady(true); setRevealDuration(timing.reveal); };
     const loaded = () => {
       if (!Number.isFinite(player.duration) || player.duration <= 0) { failed(); return; }
-      setRevealDuration(Math.round(player.duration * 1000));
+      setRevealDuration(Math.round(Math.min(player.duration, drawAudio.revealAt) / drawAudio.playbackRate * 1000));
       setAudioReady(true);
     };
     player.addEventListener("loadedmetadata", loaded);
@@ -90,7 +91,9 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
     const remaining = end - Date.now();
     if (!player || !audioReady || audioFailed || remaining <= 0) return;
     player.volume = 0.65;
-    const offset = Math.max(0, player.duration - remaining / 1000);
+    player.playbackRate = drawAudio.playbackRate;
+    player.preservesPitch = true;
+    const offset = Math.max(0, Math.min(player.duration, drawAudio.revealAt) - remaining / 1000 * drawAudio.playbackRate);
     if (Math.abs(player.currentTime - offset) > .05) player.currentTime = offset;
     audioRunning.current = true;
     const request = ++playbackRequest.current;
@@ -101,9 +104,12 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
     });
   }, [audioReady, audioFailed]);
   useEffect(() => {
-    if (!revealing) { playbackRequest.current++; audioRunning.current = false; music.current?.pause(); return; }
+    if (!revealing) {
+      if (!shown) { playbackRequest.current++; audioRunning.current = false; music.current?.pause(); }
+      return;
+    }
     if (!audioRunning.current) startAudio(deadline);
-  }, [revealing, sequence, deadline, startAudio]);
+  }, [revealing, shown, sequence, deadline, startAudio]);
   useEffect(() => () => { playbackRequest.current++; audioRunning.current = false; music.current?.pause(); }, []);
   const pending = event?.results.find((r) => !r.acknowledged);
   useEffect(() => {
@@ -130,7 +136,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
   useEffect(() => {
     if (!deadline || !revealing) return;
     const finish = () => {
-      if (audioRunning.current && music.current && !music.current.ended && !music.current.error) return;
+      if (audioRunning.current && music.current && !music.current.ended && !music.current.error && music.current.currentTime < Math.min(music.current.duration, drawAudio.revealAt)) return;
       if (!pending) { setPhase("Confirming winner…"); return; }
       timer.current.forEach(clearTimeout);
       timer.current = [];
@@ -277,10 +283,10 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
     const player = music.current;
     if (player && audioReady && !audioFailed && !player.ended) {
       timer.current.forEach(clearTimeout);
-      // Keep the closing sound cue instead of cutting the audio off.
-      const cue = Math.max(player.currentTime, player.duration - 1.2);
+      const revealAt = Math.min(player.duration, drawAudio.revealAt);
+      const cue = Math.max(player.currentTime, revealAt - drawAudio.leadIn * drawAudio.playbackRate);
       player.currentTime = cue;
-      const end = Date.now() + (player.duration - cue) * 1000;
+      const end = Date.now() + (revealAt - cue) / drawAudio.playbackRate * 1000;
       sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
       setDeadline(end);
       setCoinVisible(true);
@@ -292,8 +298,6 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
   }
   function finishReveal() {
     if (!event || !revealing) return;
-    audioRunning.current = false;
-    music.current?.pause();
     const end = Date.now();
     sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
     setDeadline(end);
@@ -303,6 +307,18 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
       setRevealing(false);
       setShown(true);
       setPhase("");
+    }
+  }
+  function syncAudio() {
+    const player = music.current;
+    if (!revealing || !audioRunning.current || !player || player.error) return;
+    const remaining = (Math.min(player.duration, drawAudio.revealAt) - player.currentTime) / drawAudio.playbackRate;
+    if (remaining <= 0) flushSync(finishReveal);
+    else if (!coinVisible && remaining <= drawAudio.leadIn) {
+      flushSync(() => {
+        setCoinVisible(true);
+        setPhase("One winner. A golden moment.");
+      });
     }
   }
   function draw() {
@@ -434,9 +450,10 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
               <br />A lot to celebrate.
             </span>
           </div>
-          <div className={`scene ${sequence > 0 ? "scene-closeup" : ""}`} onClick={e => { if (revealing && e.detail === 1) drumClicked.current = true; }}
+          <div className={`scene ${sequence > 0 ? "scene-closeup" : ""}`} hidden={!!(immersive && (coinVisible || shown) && winner)} onClick={e => { if (revealing && e.detail === 1) drumClicked.current = true; }}
             onDoubleClick={() => { if (drumClicked.current) revealNow(); drumClicked.current = false; }}>
-            {!viewingCompletedBranch && !(immersive && (coinVisible || shown) && winner) && <Scene
+            {!viewingCompletedBranch && <Scene
+              active={!(immersive && (coinVisible || shown) && winner)}
               sequence={sequence}
               duration={revealDuration}
               mediaTime={mediaTime}
@@ -665,14 +682,9 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
           })}
         </section>
         {audioAvailable && <audio ref={music} src="/draw-music.mp3" muted={muted} preload="auto"
-          onTimeUpdate={() => {
-            const player = music.current;
-            if (revealing && player && player.duration - player.currentTime <= 1.2) {
-              setCoinVisible(true);
-              setPhase("One winner. A golden moment.");
-            }
-          }}
-          onEnded={finishReveal}
+          onTimeUpdate={syncAudio}
+          onSeeked={syncAudio}
+          onEnded={() => { audioRunning.current = false; finishReveal(); }}
         />}
         {setup && (
           <div

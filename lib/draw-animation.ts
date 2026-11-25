@@ -1,3 +1,6 @@
+// Source-audio seconds: the jackpot buildup gives way to applause at this cue.
+export const drawAudio = { playbackRate: 0.75, revealAt: 5.05, leadIn: 1.2 };
+
 export const ceremonyTiming = {
   spinStart: 0,
   fastSpinEnd: 3000,

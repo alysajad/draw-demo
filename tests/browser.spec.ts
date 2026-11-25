@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { type Event as DrawEvent, branches, nextDraw, NIPPON_BRANCHES } from "../lib/model";
 import { sampleEvent, mockDraw, sampleWorkbook } from "./fixtures";
+import { drawAudio } from "../lib/draw-animation";
 
 async function liveSession(page: Page, eventId: string) {
   await page.addInitScript(id => {
@@ -390,32 +391,50 @@ function silentWav(seconds: number) {
 }
 
 test("full animation and graphics fallback preserve the winner", async ({ page }) => {
-  await page.setViewportSize({ width: 960, height: 640 });
+  await page.setViewportSize({ width: 720, height: 480 });
   await mockEvent(page);
   await page.goto("http://localhost:3000");
   await page.getByLabel("Select branch", { exact: true }).selectOption("Enjakkal");
   await page.waitForSelector("canvas[data-ready=true]");
-  await expect.poll(() => page.locator("audio").evaluate(node => (node as HTMLAudioElement).readyState)).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => page.locator("audio").evaluate(node => (node as HTMLAudioElement).readyState), { timeout: 15000 }).toBeGreaterThanOrEqual(2);
   const duration = await page.locator("audio").evaluate(node => (node as HTMLAudioElement).duration);
+  await page.evaluate(() => {
+    const player = document.querySelector("audio")!;
+    const observer = new MutationObserver(() => {
+      if (document.querySelector(".coin-winner")) {
+        player.dataset.revealTime = String(player.currentTime);
+        player.dataset.revealPaused = String(player.paused);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
   const started = Date.now();
   await page.getByRole("button", { name: "Draw 3rd prize" }).click();
   await expect.poll(() => page.locator("audio").evaluate(audio => !(audio as HTMLAudioElement).paused)).toBe(true);
   await expect(page.locator(".coin-winner")).toBeVisible({ timeout: 30000 });
-  expect(Date.now() - started).toBeGreaterThanOrEqual(duration * 1000);
-  await expect.poll(() => page.locator("audio").evaluate(audio => (audio as HTMLAudioElement).ended)).toBe(true);
+  expect(Date.now() - started).toBeGreaterThanOrEqual(drawAudio.revealAt / drawAudio.playbackRate * 1000);
+  const revealedAt = Number(await page.locator("audio").getAttribute("data-reveal-time"));
+  expect(revealedAt).toBeGreaterThanOrEqual(drawAudio.revealAt);
+  expect(revealedAt).toBeLessThan(drawAudio.revealAt + .35);
+  await expect(page.locator("audio")).toHaveAttribute("data-reveal-paused", "false");
+  await expect.poll(() => page.locator("audio").evaluate(node => (node as HTMLAudioElement).playbackRate)).toBe(.75);
+  expect(revealedAt).toBeLessThan(duration);
   await expect(page.locator(".coin-editorial")).toHaveCount(0);
   await page.screenshot({ path: "test-results/winner-animated.png" });
   await page.getByRole("button", { name: "Continue to 2nd prize" }).click();
+  await expect.poll(() => page.locator("audio").evaluate(node => (node as HTMLAudioElement).paused)).toBe(true);
   await page.locator("canvas[data-ready=true]").evaluate(canvas => canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true })));
   await expect(page.getByText("Graphics unavailable. Saved winners can still be revealed below.")).toBeVisible();
   await page.getByRole("button", { name: "Draw 2nd prize" }).click();
   await page.getByRole("button", { name: "Reveal now", exact: true }).click();
-  await expect.poll(() => page.locator("audio").evaluate(node => (node as HTMLAudioElement).currentTime)).toBeGreaterThanOrEqual(duration - 1.3);
+  await expect.poll(() => page.locator("audio").evaluate(node => (node as HTMLAudioElement).currentTime)).toBeGreaterThanOrEqual(drawAudio.revealAt - drawAudio.leadIn * drawAudio.playbackRate - .1);
   await expect(page.locator(".winner-card h2")).toBeVisible();
-  await expect.poll(() => page.locator("audio").evaluate(audio => (audio as HTMLAudioElement).paused)).toBe(true);
+  await expect.poll(() => page.locator("audio").evaluate(audio => (audio as HTMLAudioElement).paused)).toBe(false);
+  await expect.poll(() => page.locator("audio").evaluate(audio => (audio as HTMLAudioElement).ended), { timeout: 10000 }).toBe(true);
 });
 
-test("audio end controls the reveal even after playback stalls, and replay starts again without another draw", async ({ page }) => {
+test("audio cue controls the reveal even after playback stalls, and replay starts again without another draw", async ({ page }) => {
   // Audio timing is exercised independently of expensive software WebGL rendering.
   await page.addInitScript(() => {
     const getContext = HTMLCanvasElement.prototype.getContext;
@@ -443,8 +462,8 @@ test("audio end controls the reveal even after playback stalls, and replay start
     };
   });
   await page.getByRole("button", { name: "Draw 3rd prize" }).click();
-  // Deliberately run beyond the nominal two-second deadline while media is stalled.
-  await page.waitForTimeout(2200);
+  // Two source seconds take 2.67 seconds at 0.75×; a stall must delay the cue.
+  await page.waitForTimeout(3000);
   await expect(page.locator(".winner-card h2")).toHaveCount(0);
   await page.getByRole("button", { name: "Mute sound" }).click();
   await expect.poll(() => audio.evaluate(node => (node as HTMLAudioElement).muted)).toBe(true);
@@ -459,7 +478,7 @@ test("audio end controls the reveal even after playback stalls, and replay start
   await expect.poll(() => audio.evaluate(node => (node as HTMLAudioElement).currentTime)).toBeLessThan(1);
   await page.getByRole("button", { name: "Reveal now", exact: true }).click();
   await expect(page.locator(".winner-card h2")).toHaveCount(0);
-  await expect.poll(() => audio.evaluate(node => (node as HTMLAudioElement).currentTime)).toBeGreaterThanOrEqual(0.8);
+  await expect.poll(() => audio.evaluate(node => (node as HTMLAudioElement).currentTime)).toBeGreaterThanOrEqual(1.1);
   await expect(page.locator(".winner-card h2")).toHaveText(state.event.results[0].name);
   await expect.poll(() => audio.evaluate(node => (node as HTMLAudioElement).ended)).toBe(true);
   await expect.poll(() => audio.evaluate(node => (node as HTMLAudioElement).paused)).toBe(true);
