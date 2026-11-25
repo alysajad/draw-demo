@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import ExcelJS from "exceljs";
 import { columnMapping, participantPreview, readParticipantFile, winnersWorkbook } from "../lib/spreadsheet";
-import { NIPPON_BRANCHES, normalizeBranch } from "../lib/model";
+import { csvResults, NIPPON_BRANCHES, normalizeBranch } from "../lib/model";
 
 function file(name: string, data: Buffer) {
   return { name, size: data.length, text: async () => data.toString(), arrayBuffer: async () => Uint8Array.from(data).buffer };
@@ -84,4 +84,20 @@ test("one winners worksheet combines branches and writes literal text, including
   assert.equal(sheet.getCell("E2").type, ExcelJS.ValueType.String);
   assert.equal(sheet.getCell("G2").text, "0123456789");
   assert.ok(sheet.getCell("H2").text);
+});
+test("winner exports use IST regardless of machine timezone, including date rollover", async () => {
+  for (const [timestamp, expected] of [
+    ["2026-11-25T10:42:17.000Z", "25/11/2026, 16:12:17 IST"],
+    ["2026-12-31T18:30:00.000Z", "01/01/2027, 00:00:00 IST"],
+  ]) {
+    const event = mockDraw(sampleEvent(), "Enjakkal");
+    event.results[0].drawn_at = timestamp;
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(await winnersWorkbook(event));
+    const sheet = book.getWorksheet("Winners")!;
+    assert.equal(sheet.getCell("H1").text, "Draw Time (IST)");
+    assert.equal(sheet.getCell("H2").text, expected);
+    assert.ok(csvResults(event).includes(expected));
+    assert.equal(event.results[0].drawn_at, timestamp);
+  }
 });

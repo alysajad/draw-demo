@@ -95,6 +95,13 @@ export function validateEntries(entries: Entry[]) {
   });
   return errors;
 }
+const drawTimeIST = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+});
+export function formatDrawTimeIST(timestamp: string) {
+  return `${drawTimeIST.format(new Date(timestamp))} IST`;
+}
 export function csvResults(event: Event) {
   return Papa.unparse(
     event.results.map((r) => ({
@@ -105,7 +112,7 @@ export function csvResults(event: Event) {
       showroom: safe(r.showroom || ""),
       vehicle: safe(r.vehicle || ""),
       mobile: safe(r.mobile || ""),
-      drawn_at: r.drawn_at,
+      drawn_at: formatDrawTimeIST(r.drawn_at),
       eligible_count: r.eligible_count,
       snapshot_hash: event.snapshot_hash || "",
     })),
