@@ -13,6 +13,7 @@ import {
   Check,
   Download,
   Flower2,
+  LoaderCircle,
   Settings2,
   Volume2,
   VolumeX,
@@ -59,6 +60,9 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
   const graphicsFailure = useCallback(() => setGraphicsFailed(true), []);
   const reduced = useReducedMotion();
   const gate = useRef(false);
+  const stateRevision = useRef(0);
+  const refreshInFlight = useRef(false);
+  const updates = useRef<BroadcastChannel | null>(null);
   const drumClicked = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout>[]>([]);
   const music = useRef<HTMLAudioElement | null>(null);
@@ -197,6 +201,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
+      if (action !== "state" && body.event) updates.current?.postMessage(body.event.id);
       return body.event as Event | null;
     },
     [],
@@ -216,20 +221,37 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
   useEffect(() => {
     if (ready && event) sessionStorage.setItem(liveStorage, event.id);
   }, [event?.id, ready]);
+  const refresh = useCallback(async () => {
+    if (!event?.id || gate.current || revealing || refreshInFlight.current || document.hidden) return;
+    refreshInFlight.current = true;
+    const revision = stateRevision.current;
+    try {
+      const updated = await request("state", { id: event.id });
+      if (updated && !gate.current && revision === stateRevision.current)
+        setEvent(current => JSON.stringify(current) === JSON.stringify(updated) ? current : updated);
+    } catch (e) {
+      if (revision === stateRevision.current) setError(e instanceof Error ? e.message : "Unable to refresh event.");
+    } finally { refreshInFlight.current = false; }
+  }, [event?.id, revealing, request]);
   useEffect(() => {
-    if (!event) return;
-    const refresh = () => {
-      if (!gate.current)
-        request("state", { id: event.id }).then(e => { if (e) setEvent(e); })
-          .catch(e => setError(e.message));
-    };
     window.addEventListener("focus", refresh);
-    const id = setInterval(refresh, 5000);
-    return () => { window.removeEventListener("focus", refresh); clearInterval(id); };
-  }, [event?.id, request]);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("nippon-draw-updates") : null;
+    updates.current = channel;
+    if (channel) channel.onmessage = message => { if (message.data === event?.id) void refresh(); };
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      channel?.close();
+      updates.current = null;
+    };
+  }, [event?.id, refresh]);
   async function work(task: () => Promise<void>) {
     if (gate.current) return;
     gate.current = true;
+    stateRevision.current++;
     setBusy(true);
     setError("");
     try {
@@ -333,6 +355,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
       sessionStorage.setItem(attemptName, JSON.stringify(attempt));
       setSelectedBranch(attempt.branch);
       setPhase("Preparing draw…");
+      setImmersive(true);
       try {
         const updated = (await request("draw", { id: event.id, rank: attempt.rank, branch: attempt.branch, key: attempt.key }))!;
         play();
@@ -434,7 +457,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
             <h2>{activeBranch ? normalizeBranch(activeBranch) : (complete ? "Uploaded branch draws complete." : "Select a branch to begin")}</h2>
             <p>{branchProgress.filter(item => item.drawn === 3).length} of {branchOptions.length} branches drawn · {event.results.filter(r => r.acknowledged).length} of {totalPrizes} winners revealed</p></div>
           <label className="branch-select">Select branch
-            <select aria-label="Select branch" value={activeBranch} disabled={!!pending || revealing || busy} onChange={e => setSelectedBranch(e.target.value)}>
+            <select aria-label="Select branch" value={activeBranch} disabled={!!pending || revealing || busy} onChange={e => { setSelectedBranch(e.target.value); void refresh(); }}>
               <option value="">{complete ? "All branches" : "Select branch"}</option>
               {branchProgress.map(({ branch, drawn, available }) => <option key={branch} value={branch} disabled={!available}>
                 {normalizeBranch(branch)} — {!available ? "No participants" : drawn === 3 ? "Already drawn · 3/3" : drawn ? `${drawn}/3 drawn` : "Not drawn · 0/3"}
@@ -577,7 +600,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
                     >
                       {busy ? "Preparing next prize…" : noDrawsLeft ? "Celebrate all winners" : !next
                         ? "Choose another branch" : `Continue to ${rankName(next.rank)} prize`}
-                      <ArrowRight size={18} />
+                      {busy ? <LoaderCircle className="loading-indicator" size={18} aria-hidden="true" /> : <ArrowRight size={18} />}
                     </motion.button>
                     <button
                       className="text-button"
@@ -608,7 +631,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
                     : busy
                     ? "Saving the winner…"
                     : next ? `Draw ${rankName(rank)} prize` : activeBranch ? "Branch draw complete" : "Select branch to draw"}
-                  <ArrowRight size={18} />
+                  {busy ? <LoaderCircle className="loading-indicator" size={18} aria-hidden="true" /> : <ArrowRight size={18} />}
                 </motion.button>
               )}
 

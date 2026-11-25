@@ -426,6 +426,9 @@ footer button {
   gap: 10px;
   flex-wrap: wrap;
 }
+.loading-indicator { animation:loading-turn .8s linear infinite; }
+@keyframes loading-turn { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .loading-indicator { animation:none; } }
 .draw-controls h2 {
   font-size: 22px;
   margin: 12px 0 18px;

@@ -248,8 +248,64 @@ for (const skip of [false, true]) test(`draw waits for saved confirmation before
   await expect(page.locator(".draw-label")).toHaveText("Preparing draw…");
   await expect(page.locator(".winner-card h2")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Saving the winner…" })).toBeDisabled();
+  await expect(page.locator("main")).toHaveClass(/immersive/);
+  await expect(page.getByRole("button", { name: "Saving the winner…" }).locator(".loading-indicator")).toBeVisible();
   confirm(); await page.clock.resume();
   await finishDraw(page);
+});
+
+test("idle tabs make no periodic requests and refresh when another tab changes the event", async ({ page }) => {
+  const state = await mockEvent(page);
+  let reads = 0;
+  page.on("request", request => {
+    if (request.url().endsWith("/api/event") && request.postDataJSON().action === "state") reads++;
+  });
+  await page.goto("http://localhost:3000");
+  await expect(page.getByLabel("Select branch", { exact: true })).toBeVisible();
+  const initialReads = reads;
+  await page.clock.fastForward(90000);
+  expect(reads).toBe(initialReads);
+  state.event = mockDraw(state.event, "Enjakkal");
+  state.event.results[0].acknowledged = true;
+  await page.evaluate(id => {
+    const channel = new BroadcastChannel("nippon-draw-updates");
+    channel.postMessage(id);
+    channel.close();
+  }, state.event.id);
+  await expect(page.getByLabel("Select branch", { exact: true }).locator('option[value="Enjakkal"]')).toHaveText("Enjakkal — 1/3 drawn");
+  expect(reads).toBe(initialReads + 1);
+  await page.clock.fastForward(90000);
+  expect(reads).toBe(initialReads + 1);
+  expect(state.draws).toHaveLength(0);
+});
+
+test("an old background response cannot overwrite a newer draw", async ({ page }) => {
+  const state = await mockEvent(page);
+  await page.goto("http://localhost:3000");
+  await page.getByLabel("Select branch", { exact: true }).selectOption("Enjakkal");
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const stale = structuredClone(state.event);
+  let reads = 0;
+  await page.route("**/api/event", async route => {
+    if (route.request().postDataJSON().action !== "state") return route.fallback();
+    reads++;
+    await held;
+    await route.fulfill({ json: { event: stale } });
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect.poll(() => reads).toBe(1);
+  await page.evaluate(() => { window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("online")); });
+  expect(reads).toBe(1);
+  await page.getByRole("button", { name: "Draw 3rd prize" }).click();
+  await finishDraw(page);
+  const name = state.event.results[0].name;
+  const returned = page.waitForResponse(response => response.url().endsWith("/api/event") && response.request().postDataJSON().action === "state");
+  release(); await returned;
+  await expect(page.locator(".coin-winner")).toHaveText(name);
+  await page.getByRole("button", { name: "Continue to 2nd prize" }).click();
+  await expect(page.getByRole("button", { name: "Draw 2nd prize" })).toBeEnabled();
+  expect(state.draws).toHaveLength(1);
 });
 
 test("failed requests retain the same idempotency key", async ({ page }) => {

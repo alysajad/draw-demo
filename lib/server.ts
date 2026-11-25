@@ -14,6 +14,16 @@ function pool() {
     keepAlive: true,
   }));
 }
+type StoredResult = { branch: string; winner: Entry; rank: number; drawn_at: Date | string; eligible_count: number; acknowledged: boolean; idempotency_key: string };
+function eventState(event: Omit<Event, "results">, rows: StoredResult[]): Event {
+  const order = branches({ ...event, results: [] });
+  return { ...event,
+    results: rows.sort((a, b) => order.indexOf(a.branch) - order.indexOf(b.branch) || b.rank - a.rank).map(r => ({
+      ...r.winner, rank: r.rank, drawn_at: new Date(r.drawn_at).toISOString(),
+      eligible_count: r.eligible_count, acknowledged: r.acknowledged,
+    })),
+  };
+}
 async function state(db: PoolClient, id: string, user?: string): Promise<Event> {
   const {
     rows: [e],
@@ -22,18 +32,7 @@ async function state(db: PoolClient, id: string, user?: string): Promise<Event> 
     from events e where id=$1 and ($2::uuid is null or organizer=$2)`, [id, user || null]);
   if (!e) throw new Error("Event not found");
   const { saved_results: rows, ...event } = e;
-  const order = branches(event);
-  return {
-    ...event,
-    results: (rows as { branch: string; winner: Entry; rank: number; drawn_at: string; eligible_count: number; acknowledged: boolean }[])
-      .sort((a, b) => order.indexOf(a.branch) - order.indexOf(b.branch) || b.rank - a.rank).map((r) => ({
-      ...r.winner,
-      rank: r.rank,
-      drawn_at: new Date(r.drawn_at).toISOString(),
-      eligible_count: r.eligible_count,
-      acknowledged: r.acknowledged,
-    })),
-  };
+  return eventState(event, rows);
 }
 export async function operate(
   user: string,
@@ -74,6 +73,7 @@ export async function operate(
     const { rows: [event] } = await db.query("select * from events where id=$1 and organizer=$2 for update", [id, user]);
     if (!event) throw new Error("Event not found");
     let details: Record<string, unknown> = {};
+    let audited = false;
     let result: Event | undefined;
     if (action === "import") {
       const finalize = body.finalize === true;
@@ -145,13 +145,11 @@ export async function operate(
     if (action === "draw") {
       if (!/^[0-9a-f-]{36}$/i.test(String(body.key)))
         throw new Error("Invalid idempotency key");
-      const current = await state(db, id);
+      // Read after acquiring the event lock so concurrent draws see committed winners.
+      const { rows } = await db.query<StoredResult>("select * from results where event_id=$1", [id]);
+      const current = eventState(event, rows);
       result = current;
-      const same = await db.query(
-        "select 1 from results where event_id=$1 and idempotency_key=$2",
-        [id, body.key],
-      );
-      if (!same.rowCount) {
+      if (!rows.some(row => row.idempotency_key === body.key)) {
         const pending = current.results.find((r) => !r.acknowledged);
         if (!pending) {
           const next = nextDraw(current, current.branch_draw ? String(body.branch) : undefined);
@@ -163,8 +161,15 @@ export async function operate(
           const eligible = eligibleEntries(current, next.branch);
           if (!eligible.length) throw new Error("No eligible entries remain for this branch");
           const winner = eligible[randomInt(eligible.length)];
+          details = { rank: body.rank, branch: next.branch, entry_id: winner.entry_id,
+            eligible_count: eligible.length, snapshot_hash: event.snapshot_hash };
           const { rows: [saved] } = await db.query(
-            "insert into results(event_id,rank,entry_id,winner,idempotency_key,eligible_count,organizer,branch) values($1,$2,$3,$4,$5,$6,$7,$8) returning drawn_at",
+            `with saved as (
+              insert into results(event_id,rank,entry_id,winner,idempotency_key,eligible_count,organizer,branch)
+              values($1,$2,$3,$4,$5,$6,$7,$8) returning event_id, drawn_at
+            ), logged as (
+              insert into audit(event_id,organizer,action,details) select event_id,$7,'draw',$9::jsonb from saved
+            ) select drawn_at from saved`,
             [
               id,
               body.rank,
@@ -174,16 +179,11 @@ export async function operate(
               eligible.length,
               user,
               next.branch,
+              JSON.stringify(details),
             ],
           );
           result = { ...current, results: [...current.results, { ...winner, rank: next.rank, drawn_at: saved.drawn_at.toISOString(), eligible_count: eligible.length, acknowledged: false }] };
-          details = {
-            rank: body.rank,
-            branch: next.branch,
-            entry_id: winner.entry_id,
-            eligible_count: eligible.length,
-            snapshot_hash: event.snapshot_hash,
-          };
+          audited = true;
         } else {
           action = "recover";
         }
@@ -192,25 +192,28 @@ export async function operate(
       }
     }
     if (action === "ack") {
-      const current = await state(db, id);
+      const { rows } = await db.query<StoredResult>("select * from results where event_id=$1", [id]);
+      const current = eventState(event, rows);
       const pending = current.results.find((r) => !r.acknowledged);
       if (pending && (body.rank !== pending.rank || (current.branch_draw && body.entry_id !== pending.entry_id)))
         throw new Error("Result changed; refresh first");
       if (pending) {
         await db.query(
-          "update results set acknowledged=true where event_id=$1 and entry_id=$2",
-          [id, pending.entry_id],
+          `with acknowledged as (
+            update results set acknowledged=true where event_id=$1 and entry_id=$2 returning event_id
+          ), completed as (
+            update events set status='complete' where id=$1 and $3::boolean
+          ) insert into audit(event_id,organizer,action,details)
+            select event_id,$4,'ack',$5::jsonb from acknowledged`,
+          [id, pending.entry_id, !nextDraw(current), user, JSON.stringify({ rank: pending.rank })],
         );
-        if (!nextDraw(current))
-          await db.query("update events set status='complete' where id=$1", [
-            id,
-          ]);
         details = { rank: pending.rank };
+        audited = true;
       }
       result = { ...current, status: pending && !nextDraw(current) ? "complete" : current.status,
         results: current.results.map(r => r === pending ? { ...r, acknowledged: true } : r) };
     }
-    if (action !== "state")
+    if (!audited && action !== "state")
       await db.query(
         "insert into audit(event_id,organizer,action,details) values($1,$2,$3,$4)",
         [id, user, action, JSON.stringify(details)],
