@@ -5,7 +5,13 @@ import { Result, rankName } from "@/lib/model";
 
 function Coin({ hero = false }: { hero?: boolean }) {
   return <div className={`gold-coin ${hero ? "hero-coin" : ""}`}>
-    <div className="coin-face"><span className="coin-brand">NIPPON TOYOTA</span><span className="coin-emblem">✦</span><span className="coin-inscription">GOLDEN MOMENTS</span></div>
+    <div className="coin-face">{hero ? (
+      <svg viewBox="0 0 100 100" width="100%" height="100%" fill="currentColor" textAnchor="middle" aria-hidden="true">
+        <text x="50" y="27" fontSize="9" fontWeight="800" letterSpacing=".6">NIPPON TOYOTA</text>
+        <text x="50" y="66" fontSize="54">✦</text>
+        <text x="50" y="83" fontSize="6.2" fontWeight="800" letterSpacing=".6">GOLDEN MOMENTS</text>
+      </svg>
+    ) : <><span className="coin-brand">NIPPON TOYOTA</span><span className="coin-emblem">✦</span><span className="coin-inscription">GOLDEN MOMENTS</span></>}</div>
   </div>;
 }
 
