@@ -1,4 +1,21 @@
 import Papa from "papaparse";
+export const NIPPON_BRANCHES = [
+  "Enjakkal", "Irinjalakuda", "Kalamaserry", "Kayamkulam", "Kazhakootam",
+  "Kollam", "Kottayam", "Muvattupuzha", "Nettoor", "Pala",
+  "Pathanamthitta", "Thiruvalla", "Trichur",
+];
+export function normalizeBranch(value: string) {
+  const name = value.trim().replace(/\s+/g, " ");
+  const aliases: Record<string, string> = {
+    irinjalkuda: "Irinjalakuda", kalamassery: "Kalamaserry", kazhakoottam: "Kazhakootam", thrissur: "Trichur",
+  };
+  return aliases[name.toLowerCase()] || NIPPON_BRANCHES.find(branch => branch.toLowerCase() === name.toLowerCase()) || name;
+}
+export function validateBranchNames(entries: Entry[]) {
+  return [...new Set(entries.map(entry => entry.showroom).filter(Boolean))]
+    .filter(branch => !NIPPON_BRANCHES.includes(branch!))
+    .map(branch => `Unknown branch: ${branch}. Use a branch from the 13-branch list.`);
+}
 export type Entry = {
   entry_id: string;
   name: string;
@@ -98,7 +115,11 @@ function safe(v: string) {
   return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
 }
 export function branches(event: Event): string[] {
-  return event.branch_draw ? [...new Set(event.entries.map(e => e.showroom || ""))] : [""];
+  const order = (branch: string) => {
+    const index = NIPPON_BRANCHES.indexOf(normalizeBranch(branch));
+    return index === -1 ? NIPPON_BRANCHES.length : index;
+  };
+  return event.branch_draw ? [...new Set(event.entries.map(e => e.showroom || ""))].sort((a, b) => order(a) - order(b)) : [""];
 }
 export function drawSchedule(event: Event) {
   return branches(event).flatMap(branch => [3, 2, 1].map(rank => ({ branch, rank })));

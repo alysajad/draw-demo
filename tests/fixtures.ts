@@ -1,5 +1,13 @@
 import { Event, nextDraw, eligibleEntries } from "../lib/model";
 import sampleEntries from "./fixtures/sample-entries.json";
+import ExcelJS from "exceljs";
+export async function sampleWorkbook() {
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet("Participants");
+  sheet.addRow(["Ticket ID", "Name", "Phone", "Model", "Colour", "VIN", "Flagged", "Excluded", "Created At", "Branch"]);
+  sampleEntries.forEach((e, i) => sheet.addRow([e.entry_id, e.name, `00000000${String(i).padStart(3, "0")}`, e.vehicle, "", "", "No", "No", "", e.showroom]));
+  return Buffer.from(await book.xlsx.writeBuffer());
+}
 export function testEvent(): Event {
   return {
     id: crypto.randomUUID(),

@@ -91,8 +91,9 @@ main {
 .brand-mark {
   display: block;
   flex-shrink: 0;
-  width: 48px;
+  width: 56px;
   height: auto;
+  object-fit: contain;
 }
 .header-right {
   display: flex;
@@ -526,11 +527,9 @@ footer button {
   padding: 12px;
   border-left: 2px solid var(--brass);
 }
-.mapping {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 15px;
-}
+.upload-progress { flex-basis:100%; width:100%; text-align:left; }
+.upload-progress span { display:block; margin-bottom:8px; }
+.upload-progress progress { width:100%; height:12px; accent-color:var(--brass); }
 .table-wrap {
   max-height: 240px;
   overflow: auto;
@@ -589,7 +588,7 @@ td {
     letter-spacing: 1.5px;
   }
   .brand-mark {
-    width: 40px;
+    width: 44px;
   }
   .header-right {
     gap: 10px;
@@ -989,7 +988,6 @@ footer {
 .coin-entry { font-size:12px; color:#766c52; margin:6px 0; overflow-wrap:anywhere; }
 .coin-prize { display:inline-block; border:1px solid #dfbc59; border-radius:30px; background:#fff9e5; color:#795208; font-size:13px; font-weight:700; padding:7px 24px; margin:7px 0 0; max-width:100%; overflow-wrap:anywhere; }
 .coin-anticipation { color:#8d7133; font-size:14px; margin:15px 0 30px; }
-.coin-editorial { position:absolute; top:28%; z-index:2; }.coin-editorial-left { left:7%; font-family:Georgia,serif; font-size:clamp(16px,2vw,28px); font-style:italic; transform:rotate(-12deg); line-height:1.5; }.coin-editorial-left em { border-bottom:2px solid #e7c540; padding-bottom:8px; }.coin-editorial-right { right:7%; font-size:9px; font-weight:700; letter-spacing:3px; line-height:1.8; }.coin-editorial-right span { display:block; width:35px; height:1px; background:#aa8a3a; margin-top:14px; }
 .coin-rain { position:absolute; inset:0; z-index:7; pointer-events:none; overflow:hidden; }
 .falling-coin { position:absolute; top:-90px; width:var(--size); height:var(--size); animation:coin-fall var(--duration) var(--delay) linear 3 both; }
 .falling-coin .gold-coin { animation:coin-spin 1.8s var(--delay) linear infinite; box-shadow:2px 2px 0 #a87816,3px 3px 0 #f4ce59; }.falling-coin .coin-brand,.falling-coin .coin-inscription { display:none; }.falling-coin .coin-emblem { font-size:calc(var(--size) * .5); }
@@ -1008,11 +1006,17 @@ footer {
 @keyframes gold-breathe { to { opacity:.45; transform:scale(.9); } }
 @keyframes spark-in { from { opacity:.1; transform:scale(.6) rotate(-10deg); } to { opacity:1; transform:scale(1) rotate(10deg); } }
 @keyframes shadow-arrive { from { opacity:0; transform:scale(.4); } to { opacity:1; transform:scale(1); } }
-@media(max-width:700px) { .coin-editorial { display:none; }.coin-composition { inset:90px 16px 165px; }.gift-illustration { width:min(440px,95vw,48vh); }.coin-kicker { font-size:8px; letter-spacing:2px; }.coin-rank { font-size:8px; letter-spacing:1.5px; }.coin-entry { font-size:11px; }.coin-prize { font-size:12px; padding:6px 18px; }.falling-coin:nth-child(n+23) { display:none; } }
+@media(max-width:700px) { .coin-composition { inset:90px 16px 165px; }.gift-illustration { width:min(440px,95vw,48vh); }.coin-kicker { font-size:8px; letter-spacing:2px; }.coin-rank { font-size:8px; letter-spacing:1.5px; }.coin-entry { font-size:11px; }.coin-prize { font-size:12px; padding:6px 18px; }.falling-coin:nth-child(n+23) { display:none; } }
 @media(max-height:740px) { .coin-composition { top:85px; bottom:145px; }.gift-illustration { width:min(360px,47vh,75vw); }.coin-title { font-size:clamp(25px,3.5vw,42px); }.coin-customer { margin:8px auto; gap:6px 24px; }.coin-kicker { margin-bottom:6px; }.coin-divider { margin:6px 0; }.coin-prize { margin-top:3px; padding:4px 18px; } }
-@media(max-height:520px) and (min-width:701px) { .coin-composition { flex-direction:row; gap:20px; top:90px; bottom:120px; }.gift-illustration { width:38vw; flex-shrink:0; }.coin-result { width:48vw; }.coin-editorial { display:none; } }
+@media(max-height:520px) and (min-width:701px) { .coin-composition { flex-direction:row; gap:20px; top:90px; bottom:120px; }.gift-illustration { width:38vw; flex-shrink:0; }.coin-result { width:48vw; }}
 .coin-reduced .gift-illustration,.coin-reduced .gift-ribbons,.coin-reduced .gift-shadow,.coin-reduced .gift-halo,.coin-reduced .gift-spark,.coin-reduced .hero-coin { animation:none; }
 .coin-reduced .gift-lid { animation:none; transform:translate(2%,-37%) rotate(-12deg); }.coin-reduced .gift-hero-coin { animation:none; }.coin-reduced .gift-light { animation:none; opacity:.8; }
+.coin-reveal .gift-lid { animation-duration:.45s; animation-delay:.1s; }
+.coin-reveal .gift-hero-coin { animation-duration:.65s; animation-delay:.4s; }
+.coin-reveal .gift-light { animation-duration:.5s; animation-delay:.2s; }
+.coin-revealed .gift-lid { animation:none; transform:translate(2%,-37%) rotate(-12deg); }
+.coin-revealed .gift-hero-coin { animation:none; }
+.coin-revealed .gift-light { animation:none; opacity:.8; }
 @media(prefers-reduced-motion:reduce) { .coin-reveal *, .coin-reveal *::before,.coin-reveal *::after { animation-duration:.01ms!important; animation-delay:0s!important; animation-iteration-count:1!important; }.coin-rain { display:none; } }
 .branch-progress { max-width:1100px; margin:0 auto 12px; padding:22px 28px; border:1px solid #c7b77a55; border-radius:16px; background:#fffdf5; display:flex; align-items:center; justify-content:space-between; gap:24px; }
 .branch-progress h2 { margin:6px 0; font-size:26px; letter-spacing:-.6px; }.branch-progress p { margin:0; font-size:12px; color:#766b51; }.branch-progress .eyebrow { font-size:9px; }
@@ -1026,6 +1030,15 @@ footer {
 
 .immersive .branch-progress { visibility:hidden; }
 .prizes.podium .prize { border-bottom:1px solid var(--line); }
+@media(max-width:700px) {
+  .prizes.branch-results { grid-template-columns:1fr; }
+  .branch-results .prize { align-items:center; gap:14px; padding:16px 12px; }
+  .branch-results .prize:not(:last-child) { border-bottom:1px solid var(--line); }
+  .branch-results .prize::after { display:none; }
+  .branch-results .prize h3 { font-size:16px; }
+  .branch-results .prize-label { font-size:10px; letter-spacing:1px; }
+  .branch-results .prize p { font-size:12px; }
+}
 @media(max-width:700px) { .branch-progress { margin:0 16px 16px; padding:18px; display:block; }.branch-progress h2 { font-size:23px; } }
 .result-shown:not(.immersive) .stage { height:auto; min-height:300px; padding:24px 0; }
 .result-shown:not(.immersive) .winner-card.paper-fallback { position:relative; top:auto; left:auto; width:min(550px,90%); margin:0 auto; transform:none !important; }

@@ -43,6 +43,17 @@ test("PostgreSQL transactions: concurrent draws, retry, immutable snapshots, own
     assert.equal(shared.organizer, sharedOrganizer);
     const loaded = await GET(new Request("http://localhost:3000/api/event"));
     assert.equal((await loaded.json()).event.id, shared.id);
+    const upload = { id: shared.id, entries: sampleEvent().entries, prizes: ["Gold", "Gold", "Gold"], branch_draw: true, finalize: true };
+    await assert.rejects(operate(sharedOrganizer, "import", { ...upload, entries: upload.entries.slice(0, 2) }), /three/);
+    assert.equal((await operate(sharedOrganizer, "state", { id: shared.id }))!.status, "draft");
+    const saved = (await operate(sharedOrganizer, "import", upload))!;
+    assert.equal(saved.status, "locked");
+    assert.equal(saved.entries.length, 43);
+    assert.equal(saved.snapshot_hash?.length, 64);
+    const retried = (await operate(sharedOrganizer, "import", upload))!;
+    assert.equal(retried.id, saved.id);
+    assert.equal(retried.snapshot_hash, saved.snapshot_hash);
+    await assert.rejects(operate(sharedOrganizer, "import", { ...upload, prizes: ["Changed", "Gold", "Gold"] }), /locked/);
     const crossOrigin = await POST(new Request("http://localhost:3000/api/event", {
       method: "POST", headers: { Origin: "https://another-site.test" }, body: JSON.stringify({ action: "create" }),
     }));
@@ -134,7 +145,7 @@ test("PostgreSQL transactions: concurrent draws, retry, immutable snapshots, own
     branchEvent = (await operate(user, "lock", { id: branchId }))!;
     await assert.rejects(db.query("update events set branch_draw=false where id=$1", [branchId]), /immutable/);
     let previousId = "stale-ticket";
-    for (const branch of ["Kayamkulam", "Enjakkal", "Kalamaserry", "Irinjalkuda"]) {
+    for (const branch of ["Kayamkulam", "Enjakkal", "Kalamaserry", "Irinjalakuda"]) {
       while (nextDraw(branchEvent, branch)) {
         const next = nextDraw(branchEvent, branch)!;
         await assert.rejects(operate(user, "draw", { id: branchId, rank: next.rank, branch: "Wrong branch", key: randomUUID() }), /Refresh/);

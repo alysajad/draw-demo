@@ -66,8 +66,6 @@ export default function GoldCoinReveal({ winner, prize, shown, reduced }: {
         "--size": `${22 + i % 4 * 10}px`, "--spin": `${i % 2 ? 720 : -720}deg`,
       } as CSSProperties}><Coin /></div>)}
     </div>}
-    <div className="coin-editorial coin-editorial-left">A little luck.<br/><em>A golden moment.</em></div>
-    <div className="coin-editorial coin-editorial-right">A SEASON OF<br/>TOGETHERNESS<span /></div>
     <div className="coin-composition">
       <GiftBox />
       <div className="coin-result">

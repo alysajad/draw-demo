@@ -109,6 +109,8 @@ function Lamp({ x }: { x: number }) {
 }
 function World({
   sequence,
+  duration,
+  mediaTime,
   reduced,
   shown,
   winner,
@@ -116,6 +118,8 @@ function World({
   onFailure,
 }: {
   sequence: number;
+  duration: number;
+  mediaTime: () => number | null;
   reduced: boolean;
   shown: boolean;
   winner?: Result;
@@ -202,7 +206,7 @@ function World({
       chits.current!.instanceColor.needsUpdate = true;
     invalidate();
     if (!sequence || reduced) return;
-    const tl = createTimeline({ onUpdate: () => invalidate() })
+    const tl = createTimeline({ playbackRate: timing.reveal / duration, onUpdate: () => invalidate() })
       .add(
         p,
         {
@@ -271,7 +275,7 @@ function World({
       tl.revert();
       invalidate();
     };
-  }, [sequence, reduced, invalidate]);
+  }, [sequence, duration, reduced, invalidate]);
   useEffect(() => {
     if (shown) {
       timeline.current?.pause();
@@ -291,6 +295,14 @@ function World({
     }
   }, [shown, invalidate]);
   useFrame((_, delta) => {
+    const elapsed = mediaTime();
+    if (sequence && !shown && !reduced && elapsed !== null && timeline.current) {
+      timeline.current.pause();
+      timeline.current.seek(elapsed * timing.reveal / duration);
+      invalidate();
+    } else if (sequence && !shown && !reduced && timeline.current?.paused && elapsed === null) {
+      timeline.current.play();
+    }
     const p = pose.current;
     drum.current!.rotation.x = p.spin;
     lid.current!.rotation.x = p.lid;
@@ -517,6 +529,8 @@ class Boundary extends Component<
 }
 export default function Scene({
   sequence,
+  duration,
+  mediaTime,
   reduced,
   quality,
   shown,
@@ -525,6 +539,8 @@ export default function Scene({
   onFailure,
 }: {
   sequence: number;
+  duration: number;
+  mediaTime: () => number | null;
   reduced: boolean;
   quality: string;
   shown: boolean;
@@ -569,6 +585,8 @@ export default function Scene({
           <PerformanceMonitor onDecline={() => setDpr(1)} />
           <World
             sequence={sequence}
+            duration={duration}
+            mediaTime={mediaTime}
             reduced={reduced}
             shown={shown}
             winner={winner}

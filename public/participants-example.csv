@@ -1,4 +1,40 @@
-entry_id,name,showroom,vehicle,mobile
-DEMO-001,Ananya Menon,Kochi,Innova Hycross,0000000000
-DEMO-002,Arjun Nair,Thrissur,Glanza,0000000000
-DEMO-003,Meera Krishnan,Kozhikode,Urban Cruiser Hyryder,0000000000
+Ticket ID,Name,Phone,Model,Colour,VIN,Flagged,Excluded,Created At,Branch
+,,,,,,No,No,,Enjakkal
+,,,,,,No,No,,Enjakkal
+,,,,,,No,No,,Enjakkal
+,,,,,,No,No,,Irinjalakuda
+,,,,,,No,No,,Irinjalakuda
+,,,,,,No,No,,Irinjalakuda
+,,,,,,No,No,,Kalamaserry
+,,,,,,No,No,,Kalamaserry
+,,,,,,No,No,,Kalamaserry
+,,,,,,No,No,,Kayamkulam
+,,,,,,No,No,,Kayamkulam
+,,,,,,No,No,,Kayamkulam
+,,,,,,No,No,,Kazhakootam
+,,,,,,No,No,,Kazhakootam
+,,,,,,No,No,,Kazhakootam
+,,,,,,No,No,,Kollam
+,,,,,,No,No,,Kollam
+,,,,,,No,No,,Kollam
+,,,,,,No,No,,Kottayam
+,,,,,,No,No,,Kottayam
+,,,,,,No,No,,Kottayam
+,,,,,,No,No,,Muvattupuzha
+,,,,,,No,No,,Muvattupuzha
+,,,,,,No,No,,Muvattupuzha
+,,,,,,No,No,,Nettoor
+,,,,,,No,No,,Nettoor
+,,,,,,No,No,,Nettoor
+,,,,,,No,No,,Pala
+,,,,,,No,No,,Pala
+,,,,,,No,No,,Pala
+,,,,,,No,No,,Pathanamthitta
+,,,,,,No,No,,Pathanamthitta
+,,,,,,No,No,,Pathanamthitta
+,,,,,,No,No,,Thiruvalla
+,,,,,,No,No,,Thiruvalla
+,,,,,,No,No,,Thiruvalla
+,,,,,,No,No,,Trichur
+,,,,,,No,No,,Trichur
+,,,,,,No,No,,Trichur

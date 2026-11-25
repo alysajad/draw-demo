@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import { branches, Event, parseCSV, rankName, validateBranches } from "./model";
+import { branches, Event, NIPPON_BRANCHES, normalizeBranch, parseCSV, rankName, validateBranches, validateBranchNames } from "./model";
 
 export type ParticipantSheet = { name: string; csv: string };
 const aliases: Record<string, string[]> = {
@@ -31,7 +31,11 @@ export function participantPreview(csv: string, mapping: Record<string, string>)
     return true;
   });
   const parsed = parseCSV(Papa.unparse({ fields: headers, data: rows }), mapping);
-  return { ...parsed, errors: [...source.errors.map(e => e.message), ...parsed.errors, ...eligibilityErrors, ...validateBranches(parsed.entries)] };
+  const entries = parsed.entries.map(entry => ({ ...entry, showroom: normalizeBranch(entry.showroom || "") }));
+  const missingBranches = NIPPON_BRANCHES.filter(branch => !entries.some(entry => entry.showroom === branch));
+  return { ...parsed, entries, missingBranches,
+    errors: [...source.errors.map(e => e.message), ...parsed.errors, ...eligibilityErrors, ...validateBranches(entries), ...validateBranchNames(entries)],
+  };
 }
 export async function readParticipantFile(file: Pick<File, "name" | "size" | "text" | "arrayBuffer">): Promise<ParticipantSheet[]> {
   if (file.size > 8_000_000) throw new Error("Participant file must be smaller than 8 MB.");

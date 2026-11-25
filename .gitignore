@@ -4,3 +4,6 @@ node_modules
 !.env.example
 test-results
 *.tsbuildinfo
+
+/samp (1).xlsx
+/onam-winners.xlsx

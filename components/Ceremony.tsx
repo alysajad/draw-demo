@@ -23,6 +23,8 @@ import {
   branches,
   drawSchedule,
   nextDraw,
+  NIPPON_BRANCHES,
+  normalizeBranch,
 } from "@/lib/model";
 import GoldCoinReveal from "./GoldCoinReveal";
 import ParticipantImport from "./ParticipantImport";
@@ -33,8 +35,7 @@ const Scene = dynamic(() => import("./Scene"), {
 });
 import { ceremonyTiming as timing } from "@/lib/draw-animation";
 const liveStorage = "nippon-onam-live-event";
-const emptyEvent: Event = { id: "", status: "draft", entries: [], results: [], prizes: ["", "", ""], branch_draw: true };
-export default function Ceremony() {
+export default function Ceremony({ audioAvailable = false }: { audioAvailable?: boolean }) {
   const [event, setEvent] = useState<Event | null>(null),
     [ready, setReady] = useState(false),
     [setup, setSetup] = useState(false),
@@ -44,26 +45,66 @@ export default function Ceremony() {
     [revealing, setRevealing] = useState(false),
     [shown, setShown] = useState(false),
     [error, setError] = useState(""),
-    [muted, setMuted] = useState(true);
+    [muted, setMuted] = useState(false);
   const [immersive, setImmersive] = useState(false);
   const [coinVisible, setCoinVisible] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState("");
   const [deadline, setDeadline] = useState(0);
+  const [revealDuration, setRevealDuration] = useState(timing.reveal);
+  const [audioReady, setAudioReady] = useState(!audioAvailable);
+  const [audioFailed, setAudioFailed] = useState(false);
   const [graphicsFailed, setGraphicsFailed] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ percent: number | null; label: string } | null>(null);
   const graphicsFailure = useCallback(() => setGraphicsFailed(true), []);
   const reduced = useReducedMotion();
   const gate = useRef(false);
   const drumClicked = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout>[]>([]);
   const music = useRef<HTMLAudioElement | null>(null);
+  const audioRunning = useRef(false);
+  const playbackRequest = useRef(0);
+  const mediaTime = useCallback(() => audioRunning.current && music.current ? music.current.currentTime * 1000 : null, []);
+  useEffect(() => {
+    if (music.current) music.current.muted = muted;
+  }, [muted]);
   useEffect(() => {
     const player = music.current;
     if (!player) return;
-    player.volume = 0.35;
-    if ((revealing || shown) && !muted) {
-      void player.play().catch(() => {});
-    } else player.pause();
-  }, [revealing, shown, muted]);
+    const failed = () => { setAudioFailed(true); setAudioReady(true); setRevealDuration(timing.reveal); };
+    const loaded = () => {
+      if (!Number.isFinite(player.duration) || player.duration <= 0) { failed(); return; }
+      setRevealDuration(Math.round(player.duration * 1000));
+      setAudioReady(true);
+    };
+    player.addEventListener("loadedmetadata", loaded);
+    player.addEventListener("error", failed);
+    if (player.error) failed();
+    else if (player.readyState >= 1) loaded();
+    return () => {
+      player.removeEventListener("loadedmetadata", loaded);
+      player.removeEventListener("error", failed);
+    };
+  }, [audioAvailable]);
+  const startAudio = useCallback((end: number) => {
+    const player = music.current;
+    const remaining = end - Date.now();
+    if (!player || !audioReady || audioFailed || remaining <= 0) return;
+    player.volume = 0.65;
+    const offset = Math.max(0, player.duration - remaining / 1000);
+    if (Math.abs(player.currentTime - offset) > .05) player.currentTime = offset;
+    audioRunning.current = true;
+    const request = ++playbackRequest.current;
+    void player.play().catch(() => {
+      if (request !== playbackRequest.current) return;
+      audioRunning.current = false;
+      if (Date.now() >= end) setDeadline(Date.now());
+    });
+  }, [audioReady, audioFailed]);
+  useEffect(() => {
+    if (!revealing) { playbackRequest.current++; audioRunning.current = false; music.current?.pause(); return; }
+    if (!audioRunning.current) startAudio(deadline);
+  }, [revealing, sequence, deadline, startAudio]);
+  useEffect(() => () => { playbackRequest.current++; audioRunning.current = false; music.current?.pause(); }, []);
   const pending = event?.results.find((r) => !r.acknowledged);
   useEffect(() => {
     setShown(false);
@@ -89,6 +130,7 @@ export default function Ceremony() {
   useEffect(() => {
     if (!deadline || !revealing) return;
     const finish = () => {
+      if (audioRunning.current && music.current && !music.current.ended && !music.current.error) return;
       if (!pending) { setPhase("Confirming winner…"); return; }
       timer.current.forEach(clearTimeout);
       timer.current = [];
@@ -98,25 +140,48 @@ export default function Ceremony() {
     };
     const id = setTimeout(finish, Math.max(0, deadline - Date.now()));
     return () => clearTimeout(id);
-  }, [deadline, pending?.entry_id, revealing]);
+  }, [deadline, pending?.entry_id, revealing, audioFailed]);
   const latest = event?.results.at(-1);
   const branchList = event ? branches(event) : [];
+  const branchOptions = event?.branch_draw ? [
+    ...NIPPON_BRANCHES.map(branch => branchList.find(name => normalizeBranch(name) === branch) || branch),
+    ...branchList.filter(branch => !NIPPON_BRANCHES.includes(normalizeBranch(branch))),
+  ] : branchList;
   const activeBranch = event?.branch_draw
     ? pending?.showroom || (branchList.includes(selectedBranch) ? selectedBranch : "") || ""
     : "";
   const next = event ? nextDraw(event, activeBranch) : undefined;
   const rank = next?.rank || 1;
-  const totalPrizes = event ? drawSchedule(event).length : 0;
+  const totalPrizes = event?.branch_draw ? branchOptions.length * 3 : event ? drawSchedule(event).length : 0;
   const noDrawsLeft = event ? !nextDraw(event) : true;
   const complete = event?.status === "complete";
+  const branchProgress = branchOptions.map(branch => ({
+    branch,
+    available: branchList.includes(branch),
+    drawn: event!.results.filter(r => r.acknowledged && (!event!.branch_draw || r.showroom === branch)).length,
+  }));
+  const branchComplete = !!activeBranch && branchProgress.some(item => item.branch === activeBranch && item.drawn === 3);
+  const viewingCompletedBranch = branchComplete && !pending && !revealing;
+  const showAllWinners = complete && !activeBranch;
   const request = useCallback(
-    async (action = "state", data: Record<string, unknown> = {}) => {
+    async (action = "state", data: Record<string, unknown> = {}, onProgress?: (percent: number | null) => void) => {
       const payload = JSON.stringify({ action, ...data });
       if (new Blob([payload]).size > 4_000_000)
         throw new Error(
           "Import exceeds the hosting limit. Reduce the participant data size and retry.",
         );
-      const response = await fetch("/api/event", {
+      const response = onProgress ? await new Promise<Response>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/event");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.timeout = 20000;
+        xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100)); };
+        xhr.upload.onload = () => onProgress(null);
+        xhr.onload = () => resolve(new Response(xhr.responseText, { status: xhr.status }));
+        xhr.onerror = () => reject(new Error("Upload failed. Please retry."));
+        xhr.ontimeout = () => reject(new Error("Upload timed out. Please retry; saved entries will not be duplicated."));
+        xhr.send(payload);
+      }) : await fetch("/api/event", {
         signal: AbortSignal.timeout(20000),
         method: "POST",
         headers: {
@@ -185,8 +250,9 @@ export default function Ceremony() {
       window.removeEventListener("keydown", escape);
     };
   }, [immersive]);
-  function play(end = Date.now() + timing.reveal) {
+  function play(end = Date.now() + revealDuration) {
     if (!event) return;
+    startAudio(end);
     drumClicked.current = false;
     sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
     setDeadline(end);
@@ -198,19 +264,46 @@ export default function Ceremony() {
     setPhase("Good fortune is on its way.");
     timer.current.forEach(clearTimeout);
     timer.current = [];
-    if (reduced) return;
-    const elapsed = timing.reveal - Math.max(0, end - Date.now());
+    if (reduced || audioRunning.current) return;
+    const elapsed = revealDuration - Math.max(0, end - Date.now());
+    const scale = revealDuration / timing.reveal;
     timer.current.push(
-      setTimeout(() => setPhase("One winner. A golden moment."), Math.max(0, timing.lidOpen - elapsed)),
-      setTimeout(() => setCoinVisible(true), Math.max(0, timing.paperRise - elapsed)),
+      setTimeout(() => setPhase("One winner. A golden moment."), Math.max(0, timing.lidOpen * scale - elapsed)),
+      setTimeout(() => setCoinVisible(true), Math.max(0, timing.paperRise * scale - elapsed)),
     );
   }
   function revealNow() {
     if (!event || !revealing) return;
+    const player = music.current;
+    if (player && audioReady && !audioFailed && !player.ended) {
+      timer.current.forEach(clearTimeout);
+      // Keep the closing sound cue instead of cutting the audio off.
+      const cue = Math.max(player.currentTime, player.duration - 1.2);
+      player.currentTime = cue;
+      const end = Date.now() + (player.duration - cue) * 1000;
+      sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
+      setDeadline(end);
+      setCoinVisible(true);
+      setPhase("One winner. A golden moment.");
+      startAudio(end);
+      return;
+    }
+    finishReveal();
+  }
+  function finishReveal() {
+    if (!event || !revealing) return;
+    audioRunning.current = false;
+    music.current?.pause();
     const end = Date.now();
     sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
     setDeadline(end);
     if (!pending) setPhase("Confirming winner…");
+    else {
+      timer.current.forEach(clearTimeout);
+      setRevealing(false);
+      setShown(true);
+      setPhase("");
+    }
   }
   function draw() {
     if (!event || !next || pending || revealing || gate.current) return;
@@ -219,13 +312,14 @@ export default function Ceremony() {
       const stored = sessionStorage.getItem(attemptName);
       const previous = stored ? JSON.parse(stored) : null;
       const attempt = previous?.resultCount === event.results.length ? previous : {
-        resultCount: event.results.length, key: crypto.randomUUID(), rank, branch: activeBranch, deadline: Date.now() + timing.reveal,
+        resultCount: event.results.length, key: crypto.randomUUID(), rank, branch: activeBranch, deadline: Date.now() + revealDuration,
       };
       sessionStorage.setItem(attemptName, JSON.stringify(attempt));
       setSelectedBranch(attempt.branch);
-      play(attempt.deadline);
+      setPhase("Preparing draw…");
       try {
         const updated = (await request("draw", { id: event.id, rank: attempt.rank, branch: attempt.branch, key: attempt.key }))!;
+        play();
         setEvent(updated);
       } catch (error) {
         timer.current.forEach(clearTimeout);
@@ -276,7 +370,7 @@ export default function Ceremony() {
         )}
         <header className="header">
           <a className="brand" href="/" aria-label="Nippon Toyota home">
-            <img className="brand-mark" src="/toyota-emblem.svg" alt="" width={48} height={31} />
+            <img className="brand-mark" src="/toyota-emblem.svg" alt="" width={56} height={56} />
             <span>
               Nippon Toyota
               <small>HAPPINESS, DRIVEN TOGETHER.</small>
@@ -285,17 +379,21 @@ export default function Ceremony() {
           <div className="header-right">
             <button
               className="icon-button sound-toggle"
-              aria-label={muted ? "Enable sound" : "Mute sound"}
-              aria-pressed={!muted}
-              title={muted ? "Sound off" : "Sound on"}
-              onClick={() => setMuted(value => !value)}
+              aria-label={!audioAvailable || audioFailed ? "Sound unavailable" : muted ? "Enable sound" : "Mute sound"}
+              aria-pressed={audioAvailable && !audioFailed && !muted}
+              title={!audioAvailable || audioFailed ? "Draw music is unavailable" : muted ? "Sound off" : "Sound on"}
+              disabled={!audioAvailable || audioFailed}
+              onClick={() => {
+                if (music.current) music.current.muted = !muted;
+                setMuted(!muted);
+              }}
             >
               {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
             </button>
-            <button disabled={revealing || busy || !!pending} onClick={() => setSetup(true)}>Upload Excel sheet</button>
             <button
               className="icon-button"
-              aria-label="Open event preparation"
+              aria-label="Open settings"
+              title="Settings"
               onClick={() => setSetup(true)}
               disabled={revealing || busy || !!pending}
             >
@@ -315,26 +413,20 @@ export default function Ceremony() {
             Nippon Toyota <span>·</span> Onam Lucky Draw
           </p>
         </section>
-        {!event && <section className="event-empty" aria-live="polite">
-          <h2>{!ready ? "Loading event…" : "Ready for a little luck?"}</h2>
-          <p>Upload the participant sheet, then select a branch to draw its three winners.</p>
-          <button className="primary" disabled={!ready} onClick={() => setSetup(true)}>Prepare event</button>
-          {error && <p className="error" role="alert">{error}</p>}
-        </section>}
         {event?.branch_draw && <section className="branch-progress" aria-label="Branch progress">
-          <div><span className="eyebrow">{complete ? "ALL BRANCHES COMPLETE" : (activeBranch ? `BRANCH ${branchList.indexOf(activeBranch) + 1} OF ${branchList.length}` : `${branchList.length} BRANCHES`)}</span>
-            <h2>{complete ? "Every branch. A golden moment." : activeBranch || "Select a branch to begin"}</h2>
-            <p>{event.results.filter(r => r.acknowledged).length} of {totalPrizes} winners revealed · 3rd → 2nd → 1st per branch</p></div>
+          <div><span className="eyebrow">{complete ? (branchList.length === branchOptions.length ? "ALL BRANCHES COMPLETE" : "UPLOADED BRANCHES COMPLETE") : (activeBranch ? `BRANCH ${branchOptions.indexOf(activeBranch) + 1} OF ${branchOptions.length}` : `${branchOptions.length} BRANCHES`)}</span>
+            <h2>{activeBranch ? normalizeBranch(activeBranch) : (complete ? "Uploaded branch draws complete." : "Select a branch to begin")}</h2>
+            <p>{branchProgress.filter(item => item.drawn === 3).length} of {branchOptions.length} branches drawn · {event.results.filter(r => r.acknowledged).length} of {totalPrizes} winners revealed</p></div>
           <label className="branch-select">Select branch
             <select aria-label="Select branch" value={activeBranch} disabled={!!pending || revealing || busy} onChange={e => setSelectedBranch(e.target.value)}>
-              <option value="">Select branch</option>
-              {branchList.map(branch => <option key={branch} value={branch}>
-                {branch} — {event.results.filter(r => r.showroom === branch && r.acknowledged).length}/3
+              <option value="">{complete ? "All branches" : "Select branch"}</option>
+              {branchProgress.map(({ branch, drawn, available }) => <option key={branch} value={branch} disabled={!available}>
+                {normalizeBranch(branch)} — {!available ? "No participants" : drawn === 3 ? "Already drawn · 3/3" : drawn ? `${drawn}/3 drawn` : "Not drawn · 0/3"}
               </option>)}
             </select>
           </label>
         </section>}
-        <section className="stage" aria-label="Lucky draw ceremony" hidden={!event}>
+        <section className="stage" aria-label="Lucky draw ceremony" hidden={viewingCompletedBranch}>
           <div className="side-note">
             <Flower2 size={25} />
             <span>
@@ -344,8 +436,10 @@ export default function Ceremony() {
           </div>
           <div className={`scene ${sequence > 0 ? "scene-closeup" : ""}`} onClick={e => { if (revealing && e.detail === 1) drumClicked.current = true; }}
             onDoubleClick={() => { if (drumClicked.current) revealNow(); drumClicked.current = false; }}>
-            {event && !(immersive && (coinVisible || shown) && winner) && <Scene
+            {!viewingCompletedBranch && !(immersive && (coinVisible || shown) && winner) && <Scene
               sequence={sequence}
+              duration={revealDuration}
+              mediaTime={mediaTime}
               reduced={!!reduced}
               quality="auto"
               shown={shown}
@@ -417,11 +511,19 @@ export default function Ceremony() {
             </div>
           )}
         </section>
-        <section className="draw-controls" aria-live="polite" hidden={!event}>
-          {complete ? (
+        <section className="draw-controls" aria-live="polite">
+          {viewingCompletedBranch ? (
+            <>
+              <h2>Already drawn</h2>
+              <p>All three winners for {activeBranch} are shown below.</p>
+              <button disabled={busy} onClick={download}>
+                <Download size={16} /> Download winners sheet
+              </button>
+            </>
+          ) : complete ? (
             <>
               <span className="eyebrow">
-                {totalPrizes} WINNERS. ONE WONDERFUL CELEBRATION.
+                {event?.results.length} WINNERS. ONE WONDERFUL CELEBRATION.
               </span>
               <h2>Here's to your next great journey.</h2>
               <div className="actions">
@@ -434,7 +536,10 @@ export default function Ceremony() {
             <>
               <div className="draw-label">
                 <i />
-                {revealing
+                {!ready ? "Loading event…"
+                  : !event || event.status === "draft" ? "Upload a participant sheet in Settings to begin."
+                  : busy && !pending && !revealing ? "Preparing draw…"
+                  : revealing
                   ? phase
                   : pending
                     ? shown
@@ -453,7 +558,7 @@ export default function Ceremony() {
                       disabled={busy}
                       onClick={acknowledge}
                     >
-                      {noDrawsLeft ? "Celebrate all winners" : !next
+                      {busy ? "Preparing next prize…" : noDrawsLeft ? "Celebrate all winners" : !next
                         ? "Choose another branch" : `Continue to ${rankName(next.rank)} prize`}
                       <ArrowRight size={18} />
                     </motion.button>
@@ -479,10 +584,11 @@ export default function Ceremony() {
                 <motion.button
                   whileTap={{ scale: 0.98 }}
                   className="primary"
-                  disabled={busy || !ready || event?.status !== "locked" || !next}
+                  disabled={busy || !ready || !audioReady || event?.status !== "locked" || !next}
                   onClick={draw}
                 >
-                  {busy
+                  {!event || event.status === "draft" ? "Draw 3rd prize"
+                    : busy
                     ? "Saving the winner…"
                     : next ? `Draw ${rankName(rank)} prize` : activeBranch ? "Branch draw complete" : "Select branch to draw"}
                   <ArrowRight size={18} />
@@ -491,7 +597,7 @@ export default function Ceremony() {
 
             </>
           )}
-        {!complete && !revealing && event?.results.some(r => r.acknowledged || (shown && r.entry_id === pending?.entry_id)) && (
+        {!complete && !viewingCompletedBranch && !revealing && event?.results.some(r => r.acknowledged || (shown && r.entry_id === pending?.entry_id)) && (
           <div className="winners-download"><button disabled={busy} onClick={download}><Download size={16} /> Download winners sheet</button></div>
         )}
           {error && (
@@ -517,17 +623,17 @@ export default function Ceremony() {
           )}
         </section>
         <section
-          className={`prizes ${complete ? "podium" : ""}`}
+          className={`prizes ${showAllWinners ? "podium" : ""} ${viewingCompletedBranch ? "branch-results" : ""}`}
           hidden={!event}
           aria-label="Prize winners"
         >
-          {(complete ? branchList : [activeBranch]).flatMap(branch => (complete ? [2, 1, 3] : [3, 2, 1]).map(r => ({ branch, r }))).map(({ branch, r }) => {
+          {(showAllWinners ? branchList : [activeBranch]).flatMap(branch => (showAllWinners ? [2, 1, 3] : viewingCompletedBranch ? [1, 2, 3] : [3, 2, 1]).map(r => ({ branch, r }))).map(({ branch, r }) => {
             const result = event?.results.find(w => w.rank === r && (!event.branch_draw || w.showroom === branch));
             const visible = result && (result.acknowledged || shown);
             return (
               <motion.div
                 layout={!reduced}
-                className={`prize ${rank === r && !pending ? "current" : ""} ${complete && r === 1 ? "first" : ""}`}
+                className={`prize ${next && rank === r && !pending ? "current" : ""} ${showAllWinners && r === 1 ? "first" : ""}`}
                 key={`${branch}-${r}`}
               >
                 <span className="prize-medal">
@@ -558,7 +664,16 @@ export default function Ceremony() {
             );
           })}
         </section>
-        <audio ref={music} src="/draw-music.mp3" loop muted={muted} preload="auto" />
+        {audioAvailable && <audio ref={music} src="/draw-music.mp3" muted={muted} preload="auto"
+          onTimeUpdate={() => {
+            const player = music.current;
+            if (revealing && player && player.duration - player.currentTime <= 1.2) {
+              setCoinVisible(true);
+              setPhase("One winner. A golden moment.");
+            }
+          }}
+          onEnded={finishReveal}
+        />}
         {setup && (
           <div
             className="modal-backdrop"
@@ -570,7 +685,7 @@ export default function Ceremony() {
               className="setup"
               role="dialog"
               aria-modal="true"
-              aria-label="Event preparation"
+              aria-label="Settings"
               onKeyDown={(e) => {
                 if (e.key === "Escape") setSetup(false);
                 if (e.key === "Tab") {
@@ -591,33 +706,33 @@ export default function Ceremony() {
             >
               <div className="setup-heading">
                 <div>
-                  <span className="eyebrow">BEFORE THE CELEBRATION</span>
-                  <h2>Set the stage.</h2>
+                  <h2>Settings</h2>
                 </div>
                 <button
                   autoFocus
                   className="icon-button"
                   onClick={() => setSetup(false)}
-                  aria-label="Close preparation"
+                  aria-label="Close settings"
                 >
                   <X />
                 </button>
               </div>
               {(!event || event.status === "draft") && <ParticipantImport
-                key={event?.id || "new"} event={event || emptyEvent} busy={busy || !ready}
-                save={(entries, descriptions) => work(async () => {
+                busy={busy || !ready}
+                progress={uploadProgress}
+                save={entries => work(async () => {
+                  setUploadProgress({ percent: null, label: `Preparing ${entries.length} entries…` });
+                  try {
                   const current = event || await request("create");
                   if (!current) throw new Error("Unable to create event.");
-                  try {
-                    setEvent(await request("import", { id: current.id, entries, prizes: descriptions, branch_draw: true }));
-                  } catch (error) {
-                    setEvent(current);
-                    throw error;
-                  }
-                })}
-                lock={() => work(async () => {
-                  if (!event) return;
-                  setEvent(await request("lock", { id: event.id })); setSelectedBranch(""); setSetup(false);
+                  setEvent(current);
+                  setUploadProgress({ percent: 0, label: `Sending ${entries.length} entries… 0%` });
+                  setEvent(await request("import", { id: current.id, entries, prizes: current.prizes, branch_draw: true, finalize: true }, percent => {
+                    setUploadProgress({ percent, label: percent === null ? `Saving ${entries.length} entries…` : `Sending ${entries.length} entries… ${percent}%` });
+                  }));
+                  setSelectedBranch("");
+                  setSetup(false);
+                  } finally { setUploadProgress(null); }
                 })}
               />}
               {event && event.status !== "draft" && <>

@@ -10,10 +10,13 @@ export async function POST(request: Request) {
 }
 async function handle(request: Request, post: boolean) {
   try {
+    const url = new URL(request.url);
+    // Next.js may build request.url with its bind address (e.g. 0.0.0.0).
+    const host = request.headers.get("host") || url.host;
     if (
       post &&
       request.headers.get("origin") &&
-      request.headers.get("origin") !== new URL(request.url).origin
+      request.headers.get("origin") !== `${url.protocol}//${host}`
     )
       return Response.json({ error: "Invalid origin" }, { status: 403 });
     const body = post
