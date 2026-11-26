@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import { branches, Event, formatDrawTimeIST, NIPPON_BRANCHES, normalizeBranch, parseCSV, rankName, validateBranches, validateBranchNames } from "./model";
+import { Event, formatDrawTimeIST, NIPPON_BRANCHES, normalizeBranch, parseCSV, rankName, validateBranches, validateBranchNames } from "./model";
 
 export type ParticipantSheet = { name: string; csv: string };
 const aliases: Record<string, string[]> = {
@@ -67,13 +67,13 @@ export async function readParticipantFile(file: Pick<File, "name" | "size" | "te
     return { name: sheet.name, csv: Papa.unparse(rows) };
   });
 }
-export async function winnersWorkbook(event: Event) {
+export async function winnersWorkbook(event: Event, branch?: string) {
   const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Winners");
   sheet.addRow(["Branch", "Prize Rank", "Prize", "Ticket ID", "Name", "Vehicle", "Mobile", "Draw Time (IST)"]);
-  const order = branches(event);
-  [...event.results].sort((a, b) => order.indexOf(a.showroom || "") - order.indexOf(b.showroom || "") || a.rank - b.rank)
+  event.results.filter(r => branch === undefined || (r.showroom || "") === branch)
+    .sort((a, b) => (a.showroom || "").localeCompare(b.showroom || "", "en", { sensitivity: "base" }) || a.rank - b.rank)
     .forEach(r => sheet.addRow([r.showroom || "", rankName(r.rank), event.prizes[r.rank - 1] || "", r.entry_id, r.name, r.vehicle || "", r.mobile || "", formatDrawTimeIST(r.drawn_at)]));
   sheet.getRow(1).font = { bold: true };
   sheet.columns.forEach(column => { column.width = 25; column.numFmt = "@"; });

@@ -15,6 +15,7 @@ import {
   Flower2,
   LoaderCircle,
   Settings2,
+  RotateCcw,
   Volume2,
   VolumeX,
   X,
@@ -128,6 +129,18 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
         if (attempt?.resultCount !== event.results.length)
           sessionStorage.removeItem(`reveal-deadline-${event.id}`);
       }
+      if (event.status === "draft") {
+        timer.current.forEach(clearTimeout);
+        sessionStorage.removeItem(`draw-attempt-${event.id}`);
+        sessionStorage.removeItem(`reveal-deadline-${event.id}`);
+        setRevealing(false);
+        setDeadline(0);
+        setSequence(0);
+        setCoinVisible(false);
+        setImmersive(false);
+        setSelectedBranch("");
+        setPhase("");
+      }
       return;
     }
     if (pending.showroom) setSelectedBranch(pending.showroom);
@@ -136,7 +149,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
     sessionStorage.setItem(`reveal-deadline-${event.id}`, String(end));
     setDeadline(end);
     setRevealing(true);
-  }, [event?.id, pending?.entry_id]);
+  }, [event?.id, event?.status, pending?.entry_id]);
   useEffect(() => {
     if (!deadline || !revealing) return;
     const finish = () => {
@@ -173,6 +186,9 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
   const branchComplete = !!activeBranch && branchProgress.some(item => item.branch === activeBranch && item.drawn === 3);
   const viewingCompletedBranch = branchComplete && !pending && !revealing;
   const showAllWinners = complete && !activeBranch;
+  const revealedResults = event?.results.filter(r => r.acknowledged || (shown && r.entry_id === pending?.entry_id)) || [];
+  const exportBranches = [...new Set(revealedResults.map(r => r.showroom || ""))]
+    .sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
   const request = useCallback(
     async (action = "state", data: Record<string, unknown> = {}, onProgress?: (percent: number | null) => void) => {
       const payload = JSON.stringify({ action, ...data });
@@ -383,11 +399,18 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
       setImmersive(false);
     });
   }
-  function download() {
+  function download(branch?: string) {
     if (!event || revealing) return;
     void work(async () => {
-      const revealed = { ...event, results: event.results.filter(r => r.acknowledged || (shown && r.entry_id === pending?.entry_id)) };
-      saveWorkbook(await winnersWorkbook(revealed), "onam-winners.xlsx");
+      const revealed = { ...event, results: revealedResults };
+      saveWorkbook(await winnersWorkbook(revealed, branch), branch === undefined ? "onam-winners.xlsx" : `onam-winners-${branch.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "branch"}.xlsx`);
+    });
+  }
+  function reset() {
+    if (!event || busy || revealing || !window.confirm("Reset this event? This permanently deletes all uploaded participants and selected winners across every branch. You will need to upload a new sheet.")) return;
+    void work(async () => {
+      setEvent(await request("reset", { id: event.id, confirmed: true, snapshot_hash: event.snapshot_hash }));
+      setShown(false);
     });
   }
   const winner = pending || (!revealing ? latest : undefined);
@@ -434,7 +457,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
               aria-label="Open settings"
               title="Settings"
               onClick={() => setSetup(true)}
-              disabled={revealing || busy || !!pending}
+              disabled={revealing || busy}
             >
               <Settings2 size={18} />
             </button>
@@ -473,7 +496,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
               <br />A lot to celebrate.
             </span>
           </div>
-          <div className={`scene ${sequence > 0 ? "scene-closeup" : ""}`} hidden={!!(immersive && (coinVisible || shown) && winner)} onClick={e => { if (revealing && e.detail === 1) drumClicked.current = true; }}
+          <div className="scene" hidden={!!(immersive && (coinVisible || shown) && winner)} onClick={e => { if (revealing && e.detail === 1) drumClicked.current = true; }}
             onDoubleClick={() => { if (drumClicked.current) revealNow(); drumClicked.current = false; }}>
             {!viewingCompletedBranch && <Scene
               active={!(immersive && (coinVisible || shown) && winner)}
@@ -556,9 +579,6 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
             <>
               <h2>Already drawn</h2>
               <p>All three winners for {activeBranch} are shown below.</p>
-              <button disabled={busy} onClick={download}>
-                <Download size={16} /> Download winners sheet
-              </button>
             </>
           ) : complete ? (
             <>
@@ -566,11 +586,6 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
                 {event?.results.length} WINNERS. ONE WONDERFUL CELEBRATION.
               </span>
               <h2>Here's to your next great journey.</h2>
-              <div className="actions">
-                <button disabled={busy} onClick={download}>
-                  <Download size={16} /> Download winners sheet
-                </button>
-              </div>
             </>
           ) : (
             <>
@@ -637,9 +652,6 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
 
             </>
           )}
-        {!complete && !viewingCompletedBranch && !revealing && event?.results.some(r => r.acknowledged || (shown && r.entry_id === pending?.entry_id)) && (
-          <div className="winners-download"><button disabled={busy} onClick={download}><Download size={16} /> Download winners sheet</button></div>
-        )}
           {error && (
             <p className="error" role="alert">
               {error}{" "}
@@ -771,11 +783,26 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
                 })}
               />}
               {event && event.status !== "draft" && <>
-                <p className="notice">Entries are frozen. Create a separate event to upload another sheet.</p>
+                <p className="notice">Entries are frozen. Reset this event to clear its participants and winners, or create a separate event to keep them.</p>
                 <button disabled={busy} onClick={() => void work(async () => {
                   setEvent(await request("create")); setShown(false); setSelectedBranch("");
                 })}>Create separate event</button>
               </>}
+              {revealedResults.length > 0 && <section className="settings-section" aria-label="Winner downloads">
+                <h3>Winner downloads</h3>
+                <p>Download revealed winners by branch, or all branches in alphabetical order.</p>
+                <button disabled={busy} onClick={() => download()}><Download size={16} /> Download all branch winners</button>
+                <div className="branch-downloads">
+                  {exportBranches.map(branch => <button key={branch} disabled={busy} onClick={() => download(branch)}>
+                    <Download size={16} /> Download {branch || "draw"} winners
+                  </button>)}
+                </div>
+              </section>}
+              {!!(event?.entries.length || event?.results.length) && <section className="settings-section" aria-label="Reset event">
+                <h3>Reset event</h3>
+                <p>Delete the current uploaded participants and selected winners for all branches. This cannot be undone.</p>
+                <button className="reset-button" disabled={busy || revealing} onClick={reset}><RotateCcw size={16} /> Reset</button>
+              </section>}
               {error && (
                 <p className="error" role="alert">
                   {error}

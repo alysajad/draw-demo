@@ -23,7 +23,7 @@ async function handle(request: Request, post: boolean) {
       ? await request.json()
       : { id: new URL(request.url).searchParams.get("id") };
     const action = post ? body.action : "state";
-    if (!["state", "create", "import", "lock", "draw", "ack"].includes(action))
+    if (!["state", "create", "import", "lock", "draw", "ack", "reset"].includes(action))
       throw new Error("Unknown action");
     const event = await operate(sharedOrganizer, action, body);
     if (!post && new URL(request.url).searchParams.has("export") && event)

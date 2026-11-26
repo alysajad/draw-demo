@@ -170,6 +170,31 @@ test("PostgreSQL transactions: concurrent draws, retry, immutable snapshots, own
     const migrated = (await operate(sharedOrganizer, "state", { id: branchId }))!;
     assert.deepEqual(migrated.results, branchEvent.results);
     assert.equal(migrated.snapshot_hash, branchEvent.snapshot_hash);
+    await db.query(await readFile("supabase/migrations/20261126_event_reset.sql", "utf8"));
+    await assert.rejects(operate(sharedOrganizer, "reset", { id: branchId }), /Confirm/);
+    await assert.rejects(operate(other, "reset", { id: branchId, confirmed: true }), /not found/);
+    await assert.rejects(operate(sharedOrganizer, "reset", { id: branchId, confirmed: true, snapshot_hash: "stale" }), /changed/);
+    assert.equal((await operate(sharedOrganizer, "state", { id: branchId }))!.results.length, 12);
+    const resetResponse = await POST(new Request("http://localhost:3000/api/event", {
+      method: "POST", headers: { Origin: "http://localhost:3000", "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reset", id: branchId, confirmed: true, snapshot_hash: migrated.snapshot_hash }),
+    }));
+    assert.equal(resetResponse.status, 200);
+    const reset = (await resetResponse.json()).event;
+    assert.equal(reset.status, "draft");
+    assert.deepEqual(reset.entries, []);
+    assert.deepEqual(reset.results, []);
+    assert.equal((await db.query("select count(*)::int n from results where event_id=$1", [branchId])).rows[0].n, 0);
+    assert.equal((await db.query("select details from audit where event_id=$1 and action='reset'", [branchId])).rows[0].details.winners_deleted, 12);
+    assert.equal((await operate(sharedOrganizer, "state", { id }))!.results.length, 3);
+    await assert.rejects(db.query("delete from results where event_id=$1", [id]), /cannot be deleted/);
+    await assert.rejects(db.query("update events set entries='[]' where id=$1", [id]), /immutable/);
+    await operate(sharedOrganizer, "reset", { id: branchId, confirmed: true, snapshot_hash: migrated.snapshot_hash });
+    await assert.rejects(operate(sharedOrganizer, "draw", { id: branchId, rank: 3, branch: "Enjakkal", key: randomUUID() }), /Refresh/);
+    const reuploaded = (await operate(sharedOrganizer, "import", { ...upload, id: branchId }))!;
+    assert.equal(reuploaded.entries.length, 43);
+    const redrawn = (await operate(sharedOrganizer, "draw", { id: branchId, rank: 3, branch: "Enjakkal", key: randomUUID() }))!;
+    assert.equal(redrawn.results.length, 1);
   } finally {
     await db?.end();
     await (globalThis as unknown as { drawPool?: Pool }).drawPool?.end();

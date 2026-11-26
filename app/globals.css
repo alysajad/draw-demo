@@ -782,9 +782,6 @@ footer {
   font-weight: 750;
 }
 
-.scene-closeup {
-  mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
-}
 /* The ceremony occupies the viewport while a committed winner is revealed. */
 .immersive .stage {
   position: fixed;
@@ -1025,8 +1022,9 @@ footer {
 .branch-progress h2 { margin:6px 0; font-size:26px; letter-spacing:-.6px; }.branch-progress p { margin:0; font-size:12px; color:#766b51; }.branch-progress .eyebrow { font-size:9px; }
 .branch-select { display:flex; flex-direction:column; gap:8px; min-width:240px; font-size:13px; }
 .branch-select select { padding:12px; border:1px solid #c7a34b; border-radius:8px; background:#fffdf8; color:inherit; font:inherit; }
-.winners-download { display:flex; justify-content:center; margin:8px 0 0; }
-.winners-download button { padding:6px 12px; font-size:12px; color:#30291b; background:#fffdf5; border-color:#c7b77a; }
+.settings-section { margin-top:24px; padding-top:16px; border-top:1px solid var(--line); }
+.branch-downloads { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.setup .reset-button { color:#a51c30; border-color:#a51c30; }
 .immersive .header-right > button { display:none; }
 .participant-import { margin:24px 0; padding:20px 0; border-block:1px solid #ddd6bf; }
 @media(max-width:700px) { .branch-select { margin-top:16px; min-width:0; } .header-right { flex-wrap:wrap; justify-content:flex-end; } .header-right > button:not(.icon-button) { font-size:11px; padding:8px; } }
@@ -1052,7 +1050,7 @@ footer {
 /* The result and its actions occupy separate rows, including on short screens. */
 main.immersive {
   position:fixed; inset:0; z-index:30; display:grid;
-  grid-template-rows:minmax(min-content,1fr) auto; gap:20px;
+  grid-template-rows:minmax(min-content,1fr) max-content; gap:20px;
   padding:100px 20px 24px; overflow-y:auto;
   background:radial-gradient(ellipse at 50% 40%,#5c6651,#2b4134 40%,#10251c);
 }
@@ -1068,7 +1066,6 @@ main.golden-active { background:radial-gradient(ellipse at 50% 25%,#fff3b9,#fffd
 .immersive .coin-rain { inset:0; }
 .immersive.result-shown .draw-label { display:none; }
 .immersive .text-button { display:inline-block; margin:10px 8px 0; padding:8px 12px; }
-.immersive .winners-download { margin-top:8px; }
 .golden-active .draw-controls { color:#30291b; }
 .event-empty { max-width:680px; margin:32px auto 60px; padding:32px; text-align:center; border:1px solid var(--line); border-radius:16px; }
 .event-empty p { color:#766b51; line-height:1.6; }

@@ -101,3 +101,25 @@ test("winner exports use IST regardless of machine timezone, including date roll
     assert.equal(event.results[0].drawn_at, timestamp);
   }
 });
+test("branch exports exclude other branches and combined exports sort branches then prize rank", async () => {
+  let event = sampleEvent();
+  for (const branch of ["Kayamkulam", "Enjakkal"]) {
+    for (let i = 0; i < 3; i++) {
+      event = mockDraw(event, branch);
+      event.results = event.results.map(r => ({ ...r, acknowledged: true }));
+    }
+  }
+  const before = JSON.stringify(event);
+  for (const branch of [undefined, "Kayamkulam", "Kollam"]) {
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(await winnersWorkbook(event, branch));
+    const sheet = book.worksheets[0];
+    const expected = branch === undefined ? ["Enjakkal", "Kayamkulam"] : branch === "Kollam" ? [] : [branch];
+    assert.equal(sheet.rowCount, 1 + expected.length * 3);
+    expected.forEach((name, index) => ["1st", "2nd", "3rd"].forEach((rank, offset) => {
+      assert.equal(sheet.getCell(`A${2 + index * 3 + offset}`).text, name);
+      assert.equal(sheet.getCell(`B${2 + index * 3 + offset}`).text, rank);
+    }));
+  }
+  assert.equal(JSON.stringify(event), before);
+});

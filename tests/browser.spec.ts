@@ -26,6 +26,7 @@ async function mockEvent(page: Page, initial = sampleEvent(), initiallyEmpty = f
       results: state.event.results.map(r => ({ ...r, acknowledged: true })),
     };
     if (body.action === "import") state.event = { ...state.event, entries: body.entries, prizes: body.prizes, branch_draw: body.branch_draw, status: body.finalize ? "locked" : "draft" };
+    if (body.action === "reset") state.event = { ...state.event, status: "draft", entries: [], results: [], snapshot_hash: undefined, branch_draw: false };
     if (body.action === "lock") state.event = { ...state.event, status: "locked" };
     if (body.action === "create") { hasEvent = true; state.event = { ...sampleEvent(), status: "draft", entries: [] }; }
     await route.fulfill({ json: { event: hasEvent ? state.event : null } });
@@ -84,6 +85,55 @@ test("shared link opens without sign-in and keeps only the header sound toggle",
   await expect(page.getByRole("dialog")).not.toContainText(/sign in|password|draw music|prize description|Save reviewed entries|Lock live event/i);
 });
 
+test("Settings limits exports to drawn branches and reset clears records, winners and recovery state", async ({ page }) => {
+  const state = await mockEvent(page);
+  await page.goto("http://localhost:3000");
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await expect(page.getByRole("region", { name: "Winner downloads" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await page.getByLabel("Select branch", { exact: true }).selectOption("Enjakkal");
+  await page.getByRole("button", { name: "Draw 3rd prize" }).click();
+  await finishDraw(page);
+  await expect(page.getByRole("button", { name: /Download .*winners/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Exit immersive ceremony" }).click();
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await expect(page.getByRole("button", { name: "Download all branch winners" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download Kayamkulam winners" })).toHaveCount(0);
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download Enjakkal winners" }).click();
+  const file = await downloading;
+  expect(file.suggestedFilename()).toBe("onam-winners-enjakkal.xlsx");
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(Uint8Array.from(await readFile((await file.path())!)).buffer);
+  expect(book.worksheets[0].rowCount).toBe(2);
+  expect(book.worksheets[0].getCell("A2").text).toBe("Enjakkal");
+  page.once("dialog", dialog => dialog.dismiss());
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  expect(state.event.entries.length).toBeGreaterThan(0);
+  let failReset = true;
+  await page.route("**/api/event", route => {
+    if (route.request().postDataJSON().action === "reset" && failReset) {
+      failReset = false;
+      return route.fulfill({ status: 503, json: { error: "Reset failed. Please retry." } });
+    }
+    return route.fallback();
+  });
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Reset failed");
+  expect(state.event.results).toHaveLength(1);
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await expect(page.getByLabel("Participant Excel or CSV")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Winner downloads" })).toHaveCount(0);
+  expect(state.event.entries).toHaveLength(0);
+  expect(state.event.results).toHaveLength(0);
+  expect(await page.evaluate(id => [sessionStorage.getItem(`draw-attempt-${id}`), sessionStorage.getItem(`reveal-deadline-${id}`)], state.event.id)).toEqual([null, null]);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Draw 3rd prize" })).toBeDisabled();
+  await expect(page.locator(".coin-winner, .winner-card")).toHaveCount(0);
+});
+
 test("complete branch draws, refresh, replay and combined Excel download", async ({ page }) => {
   const state = await mockEvent(page);
   await page.goto("http://localhost:3000");
@@ -108,7 +158,8 @@ test("complete branch draws, refresh, replay and combined Excel download", async
   expect(new Set(state.event.results.map(r => r.entry_id)).size).toBe(12);
   await expect(page.locator(".prize")).toHaveCount(12);
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download winners sheet" }).click();
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Download all branch winners" }).click();
   const file = await download;
   expect(file.suggestedFilename()).toBe("onam-winners.xlsx");
   const book = new ExcelJS.Workbook();
@@ -168,7 +219,8 @@ test("thirteen branches show saved winners and draw status, with all 39 winners 
   await expect(page.locator(".prize")).toHaveCount(3);
   await expect(page.getByLabel("Branch progress")).toContainText("13 of 13 branches drawn · 39 of 39 winners revealed");
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download winners sheet" }).click();
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Download all branch winners" }).click();
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(Uint8Array.from(await readFile((await (await download).path())!)).buffer);
   const sheet = book.worksheets[0];
@@ -182,6 +234,7 @@ test("thirteen branches show saved winners and draw status, with all 39 winners 
       expect(row.getCell(5).text).toBe(state.event.results.find(r => r.showroom === branch && r.rank === rank)!.name);
     }
   }
+  await page.getByRole("button", { name: "Close settings" }).click();
   await selector.selectOption("");
   await expect(page.locator(".prize")).toHaveCount(39);
 });
@@ -377,8 +430,11 @@ test("Excel upload in Settings prepares the draw in one step and downloads winne
   await page.getByLabel("Select branch", { exact: true }).selectOption("Enjakkal");
   await page.getByRole("button", { name: "Draw 3rd prize" }).click();
   await finishDraw(page);
+  await expect(page.getByRole("button", { name: /Download .*winners/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Exit immersive ceremony" }).click();
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download winners sheet" }).click();
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Download all branch winners" }).click();
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(Uint8Array.from(await readFile((await (await download).path())!)).buffer);
   expect(book.worksheets[0].getCell("A2").text).toBe("Enjakkal");
@@ -444,6 +500,29 @@ function silentWav(seconds: number) {
   wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(8000, 28); wav.writeUInt16LE(1, 32);
   wav.writeUInt16LE(8, 34); wav.write("data", 36); wav.writeUInt32LE(length, 40); wav.fill(128, 44);
   return wav;
+}
+
+for (const [width, height] of [[1600, 872], [720, 480], [390, 844]]) {
+  test(`full animation frames the arrangement above the controls at ${width}x${height}`, async ({ page }) => {
+    await page.route("**/draw-music.mp3", route => route.abort());
+    const now = Date.now();
+    await page.clock.install({ time: now });
+    await page.setViewportSize({ width, height });
+    await mockEvent(page);
+    await page.goto("http://localhost:3000");
+    await page.getByLabel("Select branch", { exact: true }).selectOption("Enjakkal");
+    await expect(page.locator("canvas[data-ready=true]")).toBeVisible();
+    await page.clock.pauseAt(now + 60_000);
+    await page.getByRole("button", { name: "Draw 3rd prize" }).click();
+    await page.clock.fastForward(1600);
+    await page.clock.runFor(100);
+    await expect(page.locator("main")).toHaveClass(/immersive/);
+    await expect(page.locator(".scene")).toBeVisible();
+    const scene = await page.locator(".scene").boundingBox();
+    const controls = await page.locator(".draw-controls").boundingBox();
+    expect(scene!.y + scene!.height).toBeLessThanOrEqual(controls!.y);
+    await page.screenshot({ path: `test-results/drum-framed-${width}x${height}.png` });
+  });
 }
 
 test("full animation and graphics fallback preserve the winner", async ({ page }) => {

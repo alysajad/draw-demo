@@ -39,6 +39,8 @@ export async function operate(
   action: string,
   body: Record<string, unknown>,
 ) {
+  if (action === "reset" && (!body.id || body.confirmed !== true))
+    throw new Error("Confirm the event reset before deleting entries and winners.");
   const db = await pool().connect();
   try {
     // Idle polling does not need a transaction or a row lock.
@@ -75,6 +77,17 @@ export async function operate(
     let details: Record<string, unknown> = {};
     let audited = false;
     let result: Event | undefined;
+    if (action === "reset") {
+      if (event.entries.length || event.status !== "draft") {
+        if ((body.snapshot_hash || null) !== event.snapshot_hash)
+          throw new Error("Event changed; refresh before resetting.");
+        await db.query("select set_config('app.reset_event_id', $1, true)", [id]);
+        const removed = await db.query("delete from results where event_id=$1", [id]);
+        await db.query("update events set entries='[]',status='draft',snapshot_hash=null,branch_draw=false where id=$1", [id]);
+        details = { entries_deleted: event.entries.length, winners_deleted: removed.rowCount };
+      }
+      result = { ...event, entries: [], results: [], status: "draft", snapshot_hash: undefined, branch_draw: false };
+    }
     if (action === "import") {
       const finalize = body.finalize === true;
       if (event.status !== "draft" && !finalize) throw new Error("Event is locked");

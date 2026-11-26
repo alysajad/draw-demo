@@ -19,6 +19,7 @@ import * as THREE from "three";
 import { createTimeline } from "animejs";
 import { ceremonyTiming as timing, drumAngle } from "@/lib/draw-animation";
 import { createPaperPhysics, PAPER_COUNT } from "@/lib/paper-physics";
+import { frameArrangement } from "@/lib/scene-framing";
 
 import type { Result } from "@/lib/model";
 const brass = "#b68a38";
@@ -143,7 +144,6 @@ function World({
     distance: 7.5,
     azimuth: 0.44,
     height: 3.1,
-    target: 1.1,
     bank: 0,
   };
   const pose = useRef({ ...rest });
@@ -212,7 +212,6 @@ function World({
         {
           distance: 5.6,
           height: 2.8,
-          target: 1.65,
           duration: 900,
           ease: "outQuad",
         },
@@ -258,7 +257,6 @@ function World({
         p,
         {
           lift: 1.05,
-          target: 2.15,
           height: 2.5,
           duration: 650,
           ease: "outQuad",
@@ -288,7 +286,6 @@ function World({
         distance: 5.3,
         azimuth: 0,
         height: 2.5,
-        target: 2.15,
         bank: 0,
       });
       invalidate();
@@ -316,8 +313,9 @@ function World({
       p.height,
       Math.cos(p.azimuth) * distance,
     );
-    camera.lookAt(0, p.target, 0);
+    camera.lookAt(0, 1.1, 0);
     camera.rotation.z += p.bank;
+    frameArrangement(camera as THREE.PerspectiveCamera);
     const sim = simulation.current;
     chits.current!.visible = !!sim;
     if (sim) {
