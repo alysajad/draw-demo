@@ -72,6 +72,7 @@ main {
 }
 .brand {
   display: flex;
+  color: #000;
   align-items: center;
   gap: 11px;
   text-decoration: none;
@@ -80,13 +81,6 @@ main {
   font-size: 20px;
   letter-spacing: normal;
   white-space: nowrap;
-}
-.brand small {
-  display: block;
-  font-size: 7px;
-  letter-spacing: 2.1px;
-  margin-top: 5px;
-  font-weight: 600;
 }
 .brand-mark {
   display: block;
@@ -585,10 +579,6 @@ td {
   }
   .brand {
     font-size: 16px;
-  }
-  .brand small {
-    font-size: 5px;
-    letter-spacing: 1.5px;
   }
   .brand-mark {
     width: 44px;

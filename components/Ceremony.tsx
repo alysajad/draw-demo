@@ -433,10 +433,7 @@ export default function Ceremony({ audioAvailable = false }: { audioAvailable?: 
         <header className="header">
           <a className="brand" href="/" aria-label="Nippon Toyota home">
             <img className="brand-mark" src="/toyota-emblem.svg" alt="" width={56} height={56} />
-            <span>
-              Nippon Toyota
-              <small>HAPPINESS, DRIVEN TOGETHER.</small>
-            </span>
+            <span>NIPPON TOYOTA</span>
           </a>
           <div className="header-right">
             <button
